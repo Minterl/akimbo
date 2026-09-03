@@ -12,6 +12,8 @@ type AffineAddressOperator;
 type ScalarConsPair;
 type ScalarExpression;
 
+type LoopBody = Lambda ((), Coordinate);
+
 operator IntroduceIterationDomain (host : << LG_Polyhedron >>) -> Domain;
 operator IntroduceAffineTransform (host : << LG_AffineTransform >>) -> AffineTransform;
 operator IntroduceAffineAddressOperator (host : << LG_AffineTransform >>) -> AffineAddressOperator;
@@ -26,7 +28,7 @@ operator MakeScalarConsPair (x0 : Scalar, x1 : Scalar) -> ScalarConsPair;
 operator YieldAssign (addr : Address, val : Scalar);
 operator YieldAccumulate (addr : Address, val : Scalar);
 
-control_flow For (iteration_domain : Domain) -> Coordinate;
+operator For (iteration_domain : Domain, loop_body : LoopBody);
 
 combinator BinaryReduction (
     iteration_domain : << LG_Polyhedron >>,
@@ -47,13 +49,13 @@ combinator BinaryReduction (
     %x0_transform : AffineTransform = IntroduceAffineTransform(x0_atran);
     %x1_transform : AffineTransform = IntroduceAffineTransform(x1_atran);
 
-    %y_addr_op  :   AffineAddressOperator = IntroduceAffineAddressOperator(y_address_op);
-    %x0_addr_op :   AffineAddressOperator = IntroduceAffineAddressOperator(x0_address_op);
-    %x1_addr_op :   AffineAddressOperator = IntroduceAffineAddressOperator(x1_address_op);
+    %y_addr_op    : AffineAddressOperator = IntroduceAffineAddressOperator(y_address_op);
+    %x0_addr_op   : AffineAddressOperator = IntroduceAffineAddressOperator(x0_address_op);
+    %x1_addr_op   : AffineAddressOperator = IntroduceAffineAddressOperator(x1_address_op);
 
     %scalar_expr : ScalarExpression = IntroduceScalarExpression(scalar_expression);
 
-    For (%D) (%induction_vector : Coordinate) {
+    %loop_body : LoopBody = lambda (%induction_vector : Coordinate) {
         %y_coord :  Coordinate = ApplyAffineTransform(%induction_vector, %y_transform);
         %y_addr  :  Address    = ApplyAffineAddressOperator(%y_addr_op, %y_coord);
 
@@ -69,5 +71,7 @@ combinator BinaryReduction (
         %y : Scalar = ApplyScalarExpression(%scalar_expr, %cons_pair);
 
         YieldAccumulate(%y_addr, %y);
-    }
+    };
+
+    For(%D, %loop_body);
 }
