@@ -120,9 +120,11 @@ lg_pin(LG_Context *ctx, LG_LogicalBuilder *builder, LG_LogicalSymbol sym) {
     LG_LogicalBuilderNode *iter_node = builder->ir_tail;
     while (iter_node != NULL) {
         if (iter_node->node.y.id != sym.id) {
-            continue;
+            iter_node = iter_node->prev;
+        } else {
+            iter_node->node.y_flags |= LG_LogicalSymbolFlag_Pin;
+            return;
         }
-        iter_node->node.y_flags |= LG_LogicalSymbolFlag_Pin;
     }
 
     lg_report_error(ctx, LG_StatusKind_InvalidArgument, 
@@ -160,15 +162,21 @@ lg_contract(
 /// freeze a logical expression builder into contiguous memory &
 /// perform early validation
 ///
+/// also destroy it eventually
+///
 ////////////////////////////////////////////////////////////////////////////////
 
 LG_StatusKind
-lg_builder_finish(
+lg_lbuilder_finish(
     LG_Context *ctx,
     LG_LogicalBuilder *builder,
     LG_Allocator *artifact_allocator,
     LG_LogicalExpr *out_lexpr
 ) {
+    if (ctx->last_status != LG_StatusKind_OK) {
+        return ctx->last_status;
+    }
+
     if (builder->next_symbol_id == 0 || builder->ir_tail == NULL) {
         lg_report_error(ctx, LG_StatusKind_InvalidArgument, lg_str8_lit("attempted to finish empty builder"));
         return LG_StatusKind_InvalidArgument;
@@ -199,17 +207,17 @@ lg_builder_finish(
                 return LG_StatusKind_InvalidArgument;
             }
 
-            if (lg_unlikely(tortoise->node.y.id >= max_symbol_id)) {
+            if (lg_unlikely(tortoise->node.y.id > max_symbol_id)) {
                 lg_report_error(ctx, LG_StatusKind_InvalidArgument, 
                     lg_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.y.id, lexpr_len
                 );
                 return LG_StatusKind_InvalidArgument;
-            } else if (lg_unlikely(tortoise->node.x0.id >= max_symbol_id)) {
+            } else if (lg_unlikely(tortoise->node.x0.id > max_symbol_id)) {
                 lg_report_error(ctx, LG_StatusKind_InvalidArgument, 
                     lg_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.x0.id, lexpr_len
                 );
                 return LG_StatusKind_InvalidArgument;
-            } else if (lg_unlikely(tortoise->node.x1.id >= max_symbol_id)) {
+            } else if (lg_unlikely(tortoise->node.x1.id > max_symbol_id)) {
                 lg_report_error(ctx, LG_StatusKind_InvalidArgument, 
                     lg_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.x1.id, lexpr_len
                 );
@@ -258,6 +266,12 @@ lg_builder_finish(
     return LG_StatusKind_OK;
 }
 
+void
+lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator *artifact_allocator) {
+    lg_free(artifact_allocator, lexpr->nodes);
+    lg_memzero(lexpr, sizeof(LG_LogicalExpr));
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -284,6 +298,8 @@ lg_bv_init(LG_BitVector *bv, LG_Arena *arena, size_t set_width) {
 
     bv->n_blocks = n_blocks;
     bv->blocks = blocks;
+
+    return LG_StatusKind_OK;
 }
 
 lg_force_inline void 

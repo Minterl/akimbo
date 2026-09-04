@@ -23,7 +23,7 @@ lg_atran_strided_projection_from_shape(
 
     uint8_t last_stride = 1;
     for (uint8_t i = 1; i <= shape->rank; i++) {
-        uint8_t axis = layout == LG_LayoutKind_RowMajor ? shape->rank - i : i - 1;
+        uint8_t axis = (layout == LG_LayoutKind_RowMajor) ? (uint8_t)(shape->rank - i) : (uint8_t)(i - 1);
         A[axis] = last_stride;
 
         last_stride *= shape->dim[shape->rank - i];

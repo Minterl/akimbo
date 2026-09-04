@@ -5,20 +5,13 @@
 extern "C" {
 #endif // __cplusplus
 
-#include <libgrad/internal/core.h>
-#include <libgrad/internal/vm.h>
-#include <libgrad/internal/alloc.h>
-#include <libgrad/internal/strings.h>
+#include <libgrad/internal/expr.h>
 
 #ifdef LIBGRAD_IMPLEMENTATION
 #undef LIBGRAD_IMPLEMENTATION
-#   include <libgrad/internal/core.c>
-#   include <libgrad/internal/vm.c>
-#   include <libgrad/internal/vm_symtab.c>
-#   include <libgrad/internal/alloc.c>
-#   include <libgrad/internal/debug.c>
-#   include <libgrad/internal/strings.c>
-#   include <libgrad/internal/map.c>
+#   include <libgrad/internal/base.c>
+#   include <libgrad/internal/expr.c>
+#   include <libgrad/internal/linalg.c>
 #endif // LIBGRAD_IMPLEMENTATION
 
 #ifdef __cplusplus

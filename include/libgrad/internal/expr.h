@@ -23,6 +23,9 @@ LG_Context {
     uint8_t          err_msg_backing_buf[LG_MAX_ERR_LEN];
 } LG_Context;
 
+void
+lg_perror(LG_Context *ctx, LG_Writer *writer);
+
 /// Discriminator for an operation.
 ///
 /// The integer representations of opcodes are not designed
@@ -144,8 +147,19 @@ LG_LogicalBuilderNode {
 typedef struct
 LG_LogicalBuilder {
     LG_LogicalBuilderNode  *ir_tail;
-    uint32_t         next_symbol_id;
+    uint32_t                next_symbol_id;
 } LG_LogicalBuilder;
+
+LG_StatusKind
+lg_lbuilder_finish(
+    LG_Context *ctx,
+    LG_LogicalBuilder *builder,
+    LG_Allocator *artifact_allocator,
+    LG_LogicalExpr *out_lexpr
+);
+
+void
+lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator *artifact_allocator);
 
 LG_LogicalSymbol
 lg_param(LG_Context *ctx, LG_LogicalBuilder *lexpr, LG_LogicalShape shape);
@@ -271,7 +285,7 @@ enum {
 #   undef LG_X
 };
 
-static const struct {
+const struct {
     LG_HedralType   return_type;
     LG_HedralType   operand_types[2];
     const lg_str8   string_name;
