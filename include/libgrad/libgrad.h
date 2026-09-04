@@ -10,6 +10,7 @@ extern "C" {
 #ifdef LIBGRAD_IMPLEMENTATION
 #undef LIBGRAD_IMPLEMENTATION
 #   include <libgrad/internal/base.c>
+#   include <libgrad/internal/context.c>
 #   include <libgrad/internal/expr.c>
 #   include <libgrad/internal/linalg.c>
 #endif // LIBGRAD_IMPLEMENTATION

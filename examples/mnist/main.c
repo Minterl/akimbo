@@ -39,7 +39,7 @@ main(void) {
     LG_StatusKind status = LG_StatusKind_OK;
 
     LG_Context ctx = {0};
-    lg_arena_init(&ctx.arena, &libc_allocator);
+    lg_context_init(&ctx, &libc_allocator, &libc_writer);
 
     LG_LogicalBuilder builder = {0};
 
@@ -51,7 +51,6 @@ main(void) {
     LG_LogicalExpr expr = {0};
     status = lg_lbuilder_finish(&ctx, &builder, &libc_allocator, &expr);
     if (status != LG_StatusKind_OK) {
-        lg_perror(&ctx, &libc_writer);
         return -1;
     }
 

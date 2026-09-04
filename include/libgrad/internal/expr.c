@@ -1,57 +1,5 @@
 #include <libgrad/internal/expr.h>
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-/// 
-/// error reporting shennanigans
-///
-/// TODO: move this with the context stuff to a context.(h|c)
-///
-////////////////////////////////////////////////////////////////////////////////
-
-void
-lg_perror(LG_Context *ctx, LG_Writer *writer) {
-    lg_str8 as_string = (lg_str8){.len = ctx->err_msg_len, .p = ctx->err_msg_backing_buf};
-    lg_printf(writer, as_string);
-    lg_printf(writer, lg_str8_lit("\n"));
-}
-
-size_t 
-lg_report_error_write(void *ctx_, lg_str8 str) {
-    LG_Context *ctx = ctx_;
-    size_t bytes_written = lg_strcpy((lg_str8){
-        .len = LG_MAX_ERR_LEN - ctx->err_msg_len,
-        .p = ctx->err_msg_backing_buf + ctx->err_msg_len,
-    }, str);
-    ctx->err_msg_len += bytes_written;
-    return bytes_written;
-}
-
-/// Reports error on a best-effort basis, filling the buffer as much as possible.
-/// Does nothing if the error has already been set
-void 
-lg_report_error(LG_Context *ctx, LG_StatusKind status, lg_str8 fmt, ...) {
-    if (ctx->last_status != LG_StatusKind_OK) {
-        return;
-    }
-
-    lg_assert(status != LG_StatusKind_OK);
-
-    ctx->err_msg_len = 0;
-    ctx->last_status = status;
-
-    LG_Writer w = {
-        .ctx = (void*)ctx,
-        .write = lg_report_error_write,
-    };
-
-    va_list ap;
-    va_start(ap, fmt);
-    LG_StatusKind vprintf_status = lg_vprintf(&w, fmt, ap);
-    (void)vprintf_status;
-    va_end(ap);
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -68,7 +16,7 @@ LG_LogicalBuilderAppendOptions {
     LG_LogicalSymbol x1;
 
     LG_LogicalSymbolFlags y_flags;
-    LG_ExprNodeMeta meta_as;
+    LG_LogicalMeta meta_as;
 } LG_LogicalBuilderAppendOptions;
 
 LG_LogicalSymbol
@@ -173,8 +121,9 @@ lg_lbuilder_finish(
     LG_Allocator *artifact_allocator,
     LG_LogicalExpr *out_lexpr
 ) {
-    if (ctx->last_status != LG_StatusKind_OK) {
-        return ctx->last_status;
+    LG_StatusKind status = lg_check_error(ctx);
+    if (status != LG_StatusKind_OK) {
+        return status;
     }
 
     if (builder->next_symbol_id == 0 || builder->ir_tail == NULL) {

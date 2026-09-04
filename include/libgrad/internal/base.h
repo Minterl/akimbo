@@ -391,7 +391,8 @@ lg_strcat(
 void 
 lg_copy_to_cstring(uint8_t *dst, const lg_str8 src);
 
-#define lg_write(writer, string) (writer)->write((writer)->ctx, (string))
+size_t
+lg_write(LG_Writer *writer, lg_str8 string);
 
 LG_StatusKind 
 lg_printf(LG_Writer *writer, const lg_str8 fmt, ...);

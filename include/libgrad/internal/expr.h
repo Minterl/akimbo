@@ -2,9 +2,8 @@
 #define LG_EXPR_H_
 
 #include <libgrad/internal/base.h>
+#include <libgrad/internal/context.h>
 #include <libgrad/internal/linalg.h>
-
-#define LG_MAX_ERR_LEN 1024
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -12,19 +11,6 @@
 /// common expr types etc.
 ///
 ////////////////////////////////////////////////////////////////////////////////
-
-// TODO: this should be moved to another file, maybe
-typedef struct
-LG_Context {
-    LG_Arena         arena;
-
-    LG_StatusKind    last_status;
-    size_t           err_msg_len;
-    uint8_t          err_msg_backing_buf[LG_MAX_ERR_LEN];
-} LG_Context;
-
-void
-lg_perror(LG_Context *ctx, LG_Writer *writer);
 
 /// Discriminator for an operation.
 ///
@@ -98,7 +84,7 @@ LG_LogicalSymbol {
 } LG_LogicalSymbol;
 
 typedef union
-LG_ExprNodeMeta {
+LG_LogicalMeta {
     struct {
         size_t n_contracted_axes;
         size_t n_batch_axes;
@@ -107,7 +93,7 @@ LG_ExprNodeMeta {
     struct {
         LG_LogicalShape y_shape; 
     } param;
-} LG_ExprNodeMeta;
+} LG_LogicalMeta;
 
 typedef struct
 LG_LogicalExprNode {
@@ -118,7 +104,7 @@ LG_LogicalExprNode {
     LG_LogicalSymbol        x1;
 
     LG_LogicalSymbolFlags   y_flags;
-    LG_ExprNodeMeta  meta_as;
+    LG_LogicalMeta  meta_as;
 } LG_LogicalExprNode;
 
 typedef struct 

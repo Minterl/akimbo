@@ -14,9 +14,18 @@ lg_memcmp_(uint8_t *a, uint8_t *b, size_t len) {
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// string implementation stuff
+/// string & stream implementation stuff
 ///
 ////////////////////////////////////////////////////////////////////////////////
+
+size_t
+lg_write(LG_Writer *writer, lg_str8 string) {
+    if (writer != NULL && writer->write != NULL) {
+        return writer->write(writer->ctx, string);
+    } else {
+        return 0;
+    }
+}
 
 void 
 lg_vformat_i64(va_list ap, LG_Writer *writer) {
