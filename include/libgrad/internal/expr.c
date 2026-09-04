@@ -181,7 +181,7 @@ lg_lbuilder_finish(
     /////////////////////////////////////////////////
     // ~~ copy the data into a contigous array ~~
     
-    LG_LogicalExprNode *lexpr_nodes = (LG_LogicalExprNode*)lg_alloc_zero(artifact_allocator, lexpr_len * sizeof(LG_LogicalExprNode));
+    LG_LogicalInst *lexpr_nodes = (LG_LogicalInst*)lg_alloc_zero(artifact_allocator, lexpr_len * sizeof(LG_LogicalInst));
     if (lexpr_nodes == NULL) {
         lg_report_error(ctx, LG_StatusKind_OutOfMemory, lg_str8_lit("ran out of memory allocating logical expr nodes"));
         return LG_StatusKind_OutOfMemory;
@@ -210,14 +210,14 @@ lg_lbuilder_finish(
 
     out_lexpr->max_symbol_id = max_symbol_id;
     out_lexpr->len = lexpr_len;
-    out_lexpr->nodes = lexpr_nodes;
+    out_lexpr->insts = lexpr_nodes;
 
     return LG_StatusKind_OK;
 }
 
 void
 lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator *artifact_allocator) {
-    lg_free(artifact_allocator, lexpr->nodes);
+    lg_free(artifact_allocator, lexpr->insts);
     lg_memzero(lexpr, sizeof(LG_LogicalExpr));
 }
 
@@ -308,9 +308,7 @@ lg_validate_lexpr_structure(LG_Context *ctx, LG_LogicalExpr *lexpr) {
         bool params_end = false;
             
         for (size_t i = 0; i < lexpr->len; i++) {
-            // Param declarations must be the first section of the lexpr,
-            // while sink declarations must be at the end.
-            if (lexpr->nodes[i].opcode == LG_LogicalOpcode_Param && !params_begin) {
+            if (lexpr->insts[i].opcode == LG_LogicalOpcode_Param && !params_begin) {
                 if (i != 0) {
                     lg_report_error(ctx, LG_StatusKind_InvalidArgument, lg_str8_lit(
                         "found the first param declaration at node index %{i64}\n"
@@ -320,14 +318,14 @@ lg_validate_lexpr_structure(LG_Context *ctx, LG_LogicalExpr *lexpr) {
                     goto out;
                 }
                 params_begin = true;
-            } else if (lexpr->nodes[i].opcode == LG_LogicalOpcode_Param && params_end) {
+            } else if (lexpr->insts[i].opcode == LG_LogicalOpcode_Param && params_end) {
                 lg_report_error(ctx, LG_StatusKind_InvalidArgument, lg_str8_lit(
                     "found a param declaration after a non-param operation at node index %{i64}\n"
                     "note: param declarations must happen one after another"
                 ), i);
                 status = LG_StatusKind_InvalidArgument;
                 goto out;
-            } else if (lexpr->nodes[i].opcode != LG_LogicalOpcode_Param && params_begin) {
+            } else if (lexpr->insts[i].opcode != LG_LogicalOpcode_Param && params_begin) {
                 params_end = true;
             }
         }
@@ -349,9 +347,12 @@ lg_validate_lexpr_structure(LG_Context *ctx, LG_LogicalExpr *lexpr) {
         }
 
         for (size_t i = 0; i < lexpr->len; i++) {
-            const uint32_t new_id = lexpr->nodes[i].y.id;
-            const bool found_x0 = lg_bv_get_bit(&seen_set, lexpr->nodes[i].x0.id);
-            const bool found_x1 = lg_bv_get_bit(&seen_set, lexpr->nodes[i].x1.id);
+            const uint32_t x0_id = lexpr->insts[i].x0.id;
+            const uint32_t x1_id = lexpr->insts[i].x1.id;
+            const uint32_t new_id = lexpr->insts[i].y.id;
+
+            const bool found_x0 = lg_bv_get_bit(&seen_set, x0_id);
+            const bool found_x1 = lg_bv_get_bit(&seen_set, x1_id);
             const bool found_y  = lg_bv_get_bit(&seen_set, new_id);
 
             if (new_id == 0) {
@@ -368,25 +369,25 @@ lg_validate_lexpr_structure(LG_Context *ctx, LG_LogicalExpr *lexpr) {
                     ctx, 
                     LG_StatusKind_InvalidArgument, 
                     lg_str8_lit("symbol %{i64} was born for the second time at node index %{i64}, violating SSA"),
-                    lexpr->nodes[i].y.id, i
+                    lexpr->insts[i].y.id, i
                 );
                 status = LG_StatusKind_InvalidArgument;
                 goto out;
-            } else if (!found_x0)  {
+            } else if (!found_x0 && !lg_lopcode_is_ctor(lexpr->insts[i].opcode))  {
                 lg_report_error(
                     ctx, 
                     LG_StatusKind_InvalidArgument, 
-                    lg_str8_lit("use of unknown symbol with id as operand x0 %{i64} at node index %{i64}"),
-                    lexpr->nodes[i].x0.id, i
+                    lg_str8_lit("use of unknown symbol with id %{i64} as the first operand at node index %{i64}"),
+                    x0_id, i
                 );
                 status = LG_StatusKind_InvalidArgument;
                 goto out;
-            } else if (!found_x1 && lg_opcode_is_binary(lexpr->nodes[i].opcode)) {
+            } else if (!found_x1 && lg_lopcode_is_binary(lexpr->insts[i].opcode)) {
                 lg_report_error(
                     ctx, 
                     LG_StatusKind_InvalidArgument, 
-                    lg_str8_lit("use of unknown symbol with id as operand x1 %{i64} at node index %{i64}"),
-                    lexpr->nodes[i].x1.id, i
+                    lg_str8_lit("use of unknown symbol with id %{i64} as the second operand at node index %{i64}"),
+                    x1_id, i
                 );
                 status = LG_StatusKind_InvalidArgument;
                 goto out;
@@ -406,7 +407,7 @@ out:
 /// of the SSA form hold s.t shapes will never attempt to infer themselves
 /// on other nil shapes
 LG_StatusKind
-lg_infer_y_shape(LG_Context *ctx, const LG_LogicalExprNode *node, LG_LogicalShape *inout_shapes) {
+lg_infer_y_shape(LG_Context *ctx, const LG_LogicalInst *node, LG_LogicalShape *inout_shapes) {
     LG_StatusKind status = LG_StatusKind_OK;
 
     switch (node->opcode) {
@@ -451,13 +452,8 @@ lg_infer_y_shape(LG_Context *ctx, const LG_LogicalExprNode *node, LG_LogicalShap
         break;
     }
 
-    case LG_LogicalOpcode_Sink:
     case LG_LogicalOpcode_Hadamard:
-    case LG_LogicalOpcode_MSELoss:
-    case LG_LogicalOpcode_CrossEntropyLoss:
     case LG_LogicalOpcode_ReLU:
-    case LG_LogicalOpcode_StableSoftmax:
-    case LG_LogicalOpcode_Sigmoid:
     case LG_LogicalOpcode_LN:
         lg_unreachable("TODO");
     }
@@ -502,7 +498,7 @@ lg_lower_lexpr(
         goto out;
     }
     for (size_t i = 0; i < lexpr->len; i++) {
-        status = lg_infer_y_shape(ctx, &lexpr->nodes[i], shapes);
+        status = lg_infer_y_shape(ctx, &lexpr->insts[i], shapes);
         if (status != LG_StatusKind_OK) {
             goto out;
         }
@@ -518,7 +514,7 @@ lg_lower_lexpr(
         lg_report_error(ctx, status, lg_str8_lit("ran out of memory allocating a scratch structure"));
         goto out;
     }
-    for (size_t i = 0; i < lexpr->len; i++) {
+    for (size_t i = 0; i < lexpr->max_symbol_id; i++) {
         status = lg_atran_strided_projection_from_shape(
             &ctx->arena,
             &shapes[i],

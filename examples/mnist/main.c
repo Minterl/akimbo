@@ -48,14 +48,20 @@ main(void) {
     LG_LogicalSymbol c = lg_add(&ctx, &builder, a, b);
     lg_pin(&ctx, &builder, c);
     
-    LG_LogicalExpr expr = {0};
-    status = lg_lbuilder_finish(&ctx, &builder, &libc_allocator, &expr);
+    LG_LogicalExpr lexpr = {0};
+    status = lg_lbuilder_finish(&ctx, &builder, &libc_allocator, &lexpr);
     if (status != LG_StatusKind_OK) {
-        return -1;
+        goto out;
     }
 
-    lg_lexpr_destroy(&expr, &libc_allocator);
+    status = lg_lower_lexpr(&ctx, &libc_allocator, &lexpr, 0);
+    if (status != LG_StatusKind_OK) {
+        goto out;
+    }
+
+out:
+    lg_lexpr_destroy(&lexpr, &libc_allocator);
     lg_arena_free_all(&ctx.arena);
 
-    return 0;
+    return status;
 }

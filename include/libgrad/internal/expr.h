@@ -18,59 +18,27 @@
 /// to be stable and should not be serialized.
 typedef enum
 LG_LogicalOpcode {
-
-    //////////////////////////////////
-    // ~~ Unary Operations ~~
-
-#   define LG_FIRST_UNARY_OP LG_LogicalOpcode_Sink
-    LG_LogicalOpcode_Sink,
-
-    // Constructive operations create new symbols,
-    // while non-constructive ones do not.
-#   define LG_FIRST_CONSTRUCTIVE_OP LG_LogicalOpcode_Source
+#   define LG_LOPCODE_FIRST_CTOR LG_LogicalOpcode_Param
 
     LG_LogicalOpcode_Param,
-    /// Element-wise ReLU
+
+#   define LG_LOPCODE_FIRST_UNARY_OP LG_LogicalOpcode_ReLU
+
     LG_LogicalOpcode_ReLU,
-    /// Element-wise stable softmax
-    LG_LogicalOpcode_StableSoftmax,
-    /// Element-wise sigmoid
-    LG_LogicalOpcode_Sigmoid,
-    /// Element-wise natural log
     LG_LogicalOpcode_LN,
 
-#   define LG_LAST_UNARY_OP LG_LogicalOpcode_LN
+#   define LG_LOPCODE_FIRST_BINARY_OP LG_LogicalOpcode_Add
 
-
-    //////////////////////////////////
-    // ~~ Binary Operations ~~
-
-#   define LG_FIRST_BINARY_OP LG_LogicalOpcode_Add
-
-    /// Element-wise tensor addition
     LG_LogicalOpcode_Add,
-    /// Element-wise tensor subtraction
     LG_LogicalOpcode_Sub,
-    /// Generalized tensor contraction i.e
-    /// dot-product over strided dimensions.
-    /// Is generalizable to N-rank tensors.
     LG_LogicalOpcode_Contract,
-    /// Hadamard product
     LG_LogicalOpcode_Hadamard,
-    /// Mean Squared Error loss
-    LG_LogicalOpcode_MSELoss,
-    /// Cross-entropy loss
-    LG_LogicalOpcode_CrossEntropyLoss,
 
-#   define LG_LAST_BINARY_OP LG_LogicalOpcode_CrossEntropyLoss
-#   define LG_LAST_CONSTRUCTIVE_OP LG_LAST_BINARY_OP
 } LG_LogicalOpcode;
 
-lg_static_assert(LG_LAST_UNARY_OP + 1 == LG_FIRST_BINARY_OP);
-
-#define lg_opcode_creates_symbol(op) ((LG_FIRST_CONSTRUCTIVE_OP <= (op)) && ((op) <= LG_LAST_CONSTRUCTIVE_OP))
-#define lg_opcode_is_unary(op) ((LG_FIRST_UNARY_OP <= (op)) && ((op) <= LG_LAST_UNARY_OP))
-#define lg_opcode_is_binary(op) ((LG_FIRST_BINARY_OP <= (op)) && ((op) <= LG_LAST_BINARY_OP))
+#define lg_lopcode_is_ctor(op) ((LG_LOPCODE_FIRST_CTOR <= (op)) && ((op) < LG_LOPCODE_FIRST_UNARY_OP))
+#define lg_lopcode_is_unary(op) ((LG_LOPCODE_FIRST_UNARY_OP <= (op)) && ((op) < LG_LOPCODE_FIRST_BINARY_OP))
+#define lg_lopcode_is_binary(op) (LG_LOPCODE_FIRST_BINARY_OP <= (op))
 
 typedef uint32_t 
 LG_LogicalSymbolFlags;
@@ -96,22 +64,22 @@ LG_LogicalMeta {
 } LG_LogicalMeta;
 
 typedef struct
-LG_LogicalExprNode {
-    LG_LogicalOpcode        opcode;
+LG_LogicalInst {
+    LG_LogicalOpcode       opcode;
 
-    LG_LogicalSymbol        y;
-    LG_LogicalSymbol        x0;
-    LG_LogicalSymbol        x1;
+    LG_LogicalSymbol       y;
+    LG_LogicalSymbol       x0;
+    LG_LogicalSymbol       x1;
 
-    LG_LogicalSymbolFlags   y_flags;
-    LG_LogicalMeta  meta_as;
-} LG_LogicalExprNode;
+    LG_LogicalSymbolFlags  y_flags;
+    LG_LogicalMeta         meta_as;
+} LG_LogicalInst;
 
 typedef struct 
 LG_LogicalExpr {
     uint32_t            max_symbol_id;
     size_t              len;
-    LG_LogicalExprNode *nodes lg_check_bounds(len);
+    LG_LogicalInst     *insts lg_check_bounds(len);
 } LG_LogicalExpr;
 
 
@@ -127,7 +95,7 @@ LG_LogicalBuilderNode {
     /// Nodes are stored in reverse-chronological order, so we only have a
     /// prev pointer
     struct LG_LogicalBuilderNode *prev;
-    LG_LogicalExprNode node;
+    LG_LogicalInst node;
 } LG_LogicalBuilderNode;
 
 typedef struct

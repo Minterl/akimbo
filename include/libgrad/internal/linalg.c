@@ -38,6 +38,8 @@ lg_atran_strided_projection_from_shape(
 
     lg_assert(lg_atran_is_valid_address_operator(atran));
 
+    *out_atran = atran;
+
     return LG_StatusKind_OK;
 }
 
