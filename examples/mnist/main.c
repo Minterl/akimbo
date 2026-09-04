@@ -43,8 +43,8 @@ main(void) {
 
     LG_LogicalBuilder builder = {0};
 
-    LG_LogicalSymbol a = lg_param(&ctx, &builder, (LG_LogicalShape){0});
-    LG_LogicalSymbol b = lg_param(&ctx, &builder, (LG_LogicalShape){0});
+    LG_LogicalSymbol a = lg_param(&ctx, &builder, (LG_LogicalShape){ .rank = 2, .dim = {2, 2} });
+    LG_LogicalSymbol b = lg_param(&ctx, &builder, (LG_LogicalShape){ .rank = 1, .dim = {2} });
     LG_LogicalSymbol c = lg_add(&ctx, &builder, a, b);
     lg_pin(&ctx, &builder, c);
     

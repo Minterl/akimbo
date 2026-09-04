@@ -1,6 +1,24 @@
 #include <libgrad/internal/base.h>
 #include <libgrad/internal/linalg.h>
 
+size_t
+lg_vfmt_lshape_ptr(va_list ap, LG_Writer *writer) {
+    size_t written = 0;
+
+    LG_LogicalShape *shape = va_arg(ap, LG_LogicalShape*);
+
+    written += lg_write(writer, lg_str8_lit("{"));
+    for (size_t i = 0; i < shape->rank; i++) {
+        written += lg_printf(writer, lg_str8_lit("%{i64}"), shape->dim[i]);
+        if (i != shape->rank - 1) {
+            written += lg_write(writer, lg_str8_lit(" x "));
+        }
+    }
+    written += lg_write(writer, lg_str8_lit("}\n"));
+
+    return written;
+}
+
 LG_StatusKind
 lg_atran_strided_projection_from_shape(
     LG_Arena *arena,

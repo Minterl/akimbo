@@ -27,39 +27,52 @@ lg_write(LG_Writer *writer, lg_str8 string) {
     }
 }
 
-void 
-lg_vformat_i64(va_list ap, LG_Writer *writer) {
+#define LG_FMT_SPEC_TABLE \
+    LG_X(i64) \
+    LG_X(str) \
+    LG_X(cstr) \
+    LG_X(lshape_ptr) \
+    LG_X(status)
+
+#define LG_X(fmtspec) \
+    size_t \
+    lg_vfmt_##fmtspec(va_list ap, LG_Writer *writer);
+LG_FMT_SPEC_TABLE
+#undef LG_X
+
+static const struct {
+    uint32_t hash;
+    size_t (*fn)(va_list ap, LG_Writer *writer);
+} LG_FMT_FN_LUT[] = {
+#   define LG_X(fmtspec) {lg_hash_lit_16(#fmtspec), lg_vfmt_##fmtspec},
+    LG_FMT_SPEC_TABLE
+#   undef LG_X
+};
+#define LG_FMT_FN_LUT_LEN (sizeof(LG_FMT_FN_LUT) / sizeof(LG_FMT_FN_LUT[0]))
+
+size_t 
+lg_vfmt_i64(va_list ap, LG_Writer *writer) {
     int64_t arg = va_arg(ap, int64_t);
-    lg_write_itoa(writer, arg); 
+    return lg_write_itoa(writer, arg); 
 }
-void 
-lg_vformat_string(va_list ap, LG_Writer *writer) {
+size_t 
+lg_vfmt_str(va_list ap, LG_Writer *writer) {
     lg_str8 s = va_arg(ap, lg_str8);
-    lg_write(writer, s);
+    return lg_write(writer, s);
 }
-void 
-lg_vformat_cstring(va_list ap, LG_Writer *writer) {
+size_t 
+lg_vfmt_cstr(va_list ap, LG_Writer *writer) {
     uint8_t *s = va_arg(ap, uint8_t*);
     lg_str8 str8 = lg_str8_from_cstr(s);
-    lg_write(writer, str8);
+    return lg_write(writer, str8);
 }
-void lg_vformat_status_kind(va_list ap, LG_Writer *writer) {
+size_t 
+lg_vfmt_status(va_list ap, LG_Writer *writer) {
     LG_StatusKind status = va_arg(ap, LG_StatusKind);
     uint8_t *s = (uint8_t*)lg_status_kind_as_cstring(status);
     lg_str8 str8 = lg_str8_from_cstr(s);
-    lg_write(writer, str8);
+    return lg_write(writer, str8);
 }
-
-#define LG_FMT_FN_LUT_LEN 4
-static const struct {
-    uint32_t hash;
-    void (*fn)(va_list ap, LG_Writer *writer);
-} LG_FMT_FN_LUT[LG_FMT_FN_LUT_LEN] = {
-    {lg_hash_lit_16("i64"),     lg_vformat_i64},
-    {lg_hash_lit_16("str"),     lg_vformat_string},
-    {lg_hash_lit_16("cstr"),    lg_vformat_cstring},
-    {lg_hash_lit_16("status"),  lg_vformat_status_kind},
-};
 
 lg_str8
 lg_str8_from_cstr(uint8_t *cstr) {
@@ -137,7 +150,7 @@ lg_copy_to_cstring(uint8_t *dest, const lg_str8 src) {
     dest[i] = '\0';
 }
 
-void 
+size_t
 lg_write_itoa(LG_Writer *writer, int64_t n) {
     lg_static_assert(INT64_MAX == 9223372036854775807);
     //            ... which is -- 1234567890123456789 -- 19 digits long
@@ -166,7 +179,7 @@ lg_write_itoa(LG_Writer *writer, int64_t n) {
         buf[i_right] = temp;
     }
 
-    lg_write(writer, ((lg_str8){ .len = len, .p = buf }));
+    return lg_write(writer, ((lg_str8){ .len = len, .p = buf }));
 }
 
 LG_StatusKind 
@@ -461,6 +474,12 @@ lg_strlist_write(LG_StringList *strlist, LG_Writer *writer) {
 #include <stdio.h>
 #include <stdlib.h>
 
+size_t
+lg_dbg_write_stdout_(void *ctx, lg_str8 msg) {
+    (void)ctx;
+    return printf("%.*s", (int32_t)msg.len, msg.p);
+}
+
 void 
 lg_dbgf_(const char *file, int line, const char* fmt, ...) {
     fprintf(stderr, "\033[32m[DEBUG]\033[0m (%s:%d) -- ", file, line);
@@ -477,6 +496,15 @@ lg_assert_(const char *file, int line, bool cond, const char *cond_str) {
         fprintf(stderr, "\x1b[31m[ASSERTION FAILED]\x1b[0m (%s) at %s:%d\n", cond_str, file, line);
         abort();
     }
+}
+
+#else 
+
+size_t
+lg_dbg_write_stdout_(void *ctx, lg_str8 msg) {
+    (void)ctx;
+    (void)msg;
+    return msg.len;
 }
 
 #endif // LG_DEBUG

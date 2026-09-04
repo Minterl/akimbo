@@ -1,3 +1,5 @@
+#include "libgrad/internal/base.h"
+#include "libgrad/internal/linalg.h"
 #include <libgrad/internal/expr.h>
 
 
@@ -430,6 +432,7 @@ lg_infer_y_shape(LG_Context *ctx, const LG_LogicalInst *node, LG_LogicalShape *i
             );
             return status;
         }
+        inout_shapes[node->y.id] = y;
         break;
     }
 
@@ -449,6 +452,7 @@ lg_infer_y_shape(LG_Context *ctx, const LG_LogicalInst *node, LG_LogicalShape *i
             );
             return status;
         }
+        inout_shapes[node->y.id] = y;
         break;
     }
 
@@ -529,6 +533,7 @@ lg_lower_lexpr(
 
         lg_assert(lg_atran_is_valid_address_operator(addr_ops[i]));
     }
+
 
     /////////////////////////////////////////////////////////////////
     // ~~ fin ~~

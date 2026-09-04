@@ -95,6 +95,9 @@ LG_MappedSpace {
 #define lg_atran_get_x_len(atran) ((atran)->n_cols)
 #define lg_atran_get_y_len(atran) ((atran)->n_rows)
 
+void
+lg_lshape_fmt(LG_LogicalShape *shape, LG_Writer *writer);
+
 LG_StatusKind
 lg_poly_make_parallelotope(
     LG_Arena *arena,
