@@ -67,6 +67,7 @@ mrv_report_error(MRV_Error *err, MRV_Span span, lg_str8 fmt, ...) {
     MRV_X(Equals,             "=") \
     MRV_X(BeginHostType,      "<<") \
     MRV_X(EndHostType,        ">>") \
+    MRV_X(Unit,               "()") \
     MRV_X(Language,           "language") \
     MRV_X(Type,               "type") \
     MRV_X(Operator,           "operator") \
@@ -383,16 +384,20 @@ mrv_lex(LG_Allocator *artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
 
 
         case '(': {
-            if (!mrv_lexer_match_sequence(&ctx, lg_str8_lit("(*"), NULL)) {
+            MRV_Span span = {0};
+            if (mrv_lexer_match_sequence(&ctx, lg_str8_lit("(*"), NULL)) {
+                mrv_lexer_skip(&ctx);
+                mrv_lexer_skip(&ctx);
+                const lg_str8 close = lg_str8_lit("*)");
+                while (!mrv_lexer_match_sequence(&ctx, close, NULL)) {
+                    mrv_lexer_skip(&ctx);
+                }
+                mrv_lexer_skip(&ctx);
+            } else if (mrv_lexer_match_sequence(&ctx, lg_str8_lit("()"), &span)) {
+                mrv_tstream_append(&tstream, artifact_allocator, (MRV_Token){ .span = span, .kind = MRV_TokenKind_Unit });
+            } else {
                 goto single_char;
             }
-            mrv_lexer_skip(&ctx);
-            mrv_lexer_skip(&ctx);
-            const lg_str8 close = lg_str8_lit("*)");
-            while (!mrv_lexer_match_sequence(&ctx, close, NULL)) {
-                mrv_lexer_skip(&ctx);
-            }
-            mrv_lexer_skip(&ctx);
 
             break;
         }
@@ -456,7 +461,7 @@ unexpected_char:;
         }
     }
 
-    mrv_tstream_append(&tstream, ctx.artifact, (MRV_Token){
+    mrv_tstream_append(&tstream, artifact_allocator, (MRV_Token){
         .kind = MRV_TokenKind_EOF,
         .span = mrv_span_zero_len(ctx.current_offset),
     });
@@ -488,11 +493,13 @@ enum {
     MRV_X(SymbolIdent) \
     MRV_X(HostTypeIdent) \
     MRV_X(OtherIdent) \
+    MRV_X(Unit) \
     MRV_X(SymbolDeclaration) \
     MRV_X(LanguageDeclaration) \
     MRV_X(CombinatorDeclaration) \
     MRV_X(TypeDeclaration) \
     MRV_X(OperatorDeclaration) \
+    MRV_X(NonTrivialType) \
     MRV_X(DeclarationArg) \
     MRV_X(DeclarationArgList) \
     MRV_X(InvocationArgList) \
@@ -544,7 +551,8 @@ MRV_ASTNodeChildren {
     struct {} SymbolIdent;
     struct {} HostTypeIdent;
     struct {} OtherIdent;
-
+    struct {} Unit;
+ 
     struct {
         MRV_ASTNode *ident;
         MRV_ASTNode *arg_list;
@@ -571,7 +579,13 @@ MRV_ASTNodeChildren {
 
     struct {
         MRV_ASTNode *ident;
+        MRV_ASTNode *non_trivial_alias;
     } TypeDeclaration;
+
+    struct {
+        MRV_ASTNode *outermost_ident;
+        MRV_ASTNode *invocation_arg_list;
+    } NonTrivialType;
 
     struct {
         MRV_ASTNode *ident;
@@ -624,7 +638,6 @@ MRV_ASTNodeChildren {
 struct 
 MRV_ASTNode {
     MRV_ASTNodeChildren children_as;
-
     MRV_ASTNodeKind kind;
     MRV_Span span;
 };
@@ -915,6 +928,13 @@ mrv_parse_symbol_ident(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
+mrv_parse_unit(MRV_ParserContext *ctx) {
+    MRV_Token tok = mrv_parser_expect(ctx, MRV_TokenKind_Unit);
+    MRV_ASTNode *node = mrv_parser_mknode(ctx, Unit, tok.span);
+    return node;
+}
+
+MRV_ASTNode*
 mrv_parse_symbol_decl(MRV_ParserContext *ctx) {
     MRV_ASTNode *symbol_ident = mrv_parse_symbol_ident(ctx);
     mrv_parser_expect(ctx, MRV_TokenKind_Colon);
@@ -953,6 +973,13 @@ mrv_parse_invocation_arg_list(MRV_ParserContext *ctx) {
         case MRV_TokenKind_SymbolIdent: {
             MRV_ASTNode *arg = mrv_parse_symbol_ident(ctx);
             mrv_parser_nrs_push(ctx, arg);
+            n_children++;
+            break;
+        }
+
+        case MRV_TokenKind_Unit: {
+            MRV_ASTNode *unit = mrv_parse_unit(ctx);
+            mrv_parser_nrs_push(ctx, unit);
             n_children++;
             break;
         }
@@ -1228,10 +1255,43 @@ mrv_parse_language_decl(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
+mrv_parse_non_trivial_type(MRV_ParserContext *ctx) {
+    MRV_ASTNode *outermost_ident = mrv_parse_other_ident(ctx);
+    mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
+    MRV_ASTNode *arg_list = mrv_parse_invocation_arg_list(ctx);
+    MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){outermost_ident, arg_list});
+    MRV_ASTNode *node = mrv_parser_mknode(
+        ctx,
+        NonTrivialType,
+        all_span,
+        .outermost_ident = outermost_ident,
+        .invocation_arg_list = arg_list,
+    );
+    return node;
+}
+
+MRV_ASTNode*
 mrv_parse_type_decl(MRV_ParserContext *ctx) {
     MRV_ASTNode *ident = mrv_parse_other_ident(ctx);
+    MRV_ASTNode *non_trivial_alias = mrv_parser_nil_node(ctx);
+
+    MRV_Token peek = mrv_parser_peek(ctx);
+    if (peek.kind == MRV_TokenKind_Equals) {
+        mrv_parser_consume(ctx);
+        non_trivial_alias = mrv_parse_non_trivial_type(ctx);
+    }
+
     mrv_parser_expect(ctx, MRV_TokenKind_Semicolon);
-    MRV_ASTNode *node = mrv_parser_mknode(ctx, TypeDeclaration, ident->span, .ident = ident);
+
+    MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){ident, non_trivial_alias});
+    MRV_ASTNode *node = mrv_parser_mknode(
+        ctx,
+        TypeDeclaration,
+        all_span, 
+        .ident = ident,
+        .non_trivial_alias = non_trivial_alias,
+    );
+
     return node;
 }
 
@@ -1476,6 +1536,7 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
         case MRV_ASTNodeKind_OtherIdent:
         case MRV_ASTNodeKind_SymbolIdent:
         case MRV_ASTNodeKind_HostTypeIdent:
+        case MRV_ASTNodeKind_Unit:
             is_leaf = true;
             break;
 
@@ -1485,6 +1546,12 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
 
         case MRV_ASTNodeKind_TypeDeclaration:
             mrv_ast_dump_r(ctx, self, as.TypeDeclaration.ident);
+            mrv_ast_dump_r(ctx, self, as.TypeDeclaration.non_trivial_alias);
+            break;
+
+        case MRV_ASTNodeKind_NonTrivialType:
+            mrv_ast_dump_r(ctx, self, as.NonTrivialType.invocation_arg_list);
+            mrv_ast_dump_r(ctx, self, as.NonTrivialType.outermost_ident);
             break;
 
         case MRV_ASTNodeKind_OperatorDeclaration:
@@ -1768,6 +1835,7 @@ mrv_sema_traverse_children(
     case MRV_ASTNodeKind_Error:
     case MRV_ASTNodeKind_SymbolIdent:
     case MRV_ASTNodeKind_OtherIdent:
+    case MRV_ASTNodeKind_Unit:
     case MRV_ASTNodeKind_HostTypeIdent:
         break;
 
@@ -1818,7 +1886,21 @@ mrv_sema_traverse_children(
 
     case MRV_ASTNodeKind_TypeDeclaration: {
         lg_assert(as.TypeDeclaration.ident->kind == MRV_ASTNodeKind_OtherIdent);
+        lg_assert(
+            as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_NonTrivialType ||
+            as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_Error
+
+        );
         next(ctx, as.TypeDeclaration.ident);
+        next(ctx, as.TypeDeclaration.non_trivial_alias);
+        break;
+    }
+
+    case MRV_ASTNodeKind_NonTrivialType: {
+        lg_assert(as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_OtherIdent);
+        lg_assert(as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
+        next(ctx, as.NonTrivialType.outermost_ident);
+        next(ctx, as.NonTrivialType.invocation_arg_list);
         break;
     }
 
@@ -1993,6 +2075,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     case MRV_ASTNodeKind_TypeDeclaration: {
         lg_str8 ident = mrv_span_to_str8(self->children_as.TypeDeclaration.ident->span, ctx->text);
+        lg_unreachable("TODO");
 
         size_t idx;
         bool found;
@@ -3327,4 +3410,5 @@ out_free_all:
     return ret_code;
 }
 
-#include <libgrad/internal/base.c>
+#define LIBGRAD_IMPLEMENTATION
+#include <libgrad/libgrad.h>
