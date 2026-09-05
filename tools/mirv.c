@@ -68,6 +68,7 @@ mrv_report_error(MRV_Error *err, MRV_Span span, lg_str8 fmt, ...) {
     MRV_X(BeginHostType,      "<<") \
     MRV_X(EndHostType,        ">>") \
     MRV_X(Unit,               "()") \
+    MRV_X(Lambda,             "lambda") \
     MRV_X(Language,           "language") \
     MRV_X(Type,               "type") \
     MRV_X(Operator,           "operator") \
@@ -293,7 +294,7 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
            return (MRV_Token){ .kind = MRV_TokenKind_Error };
         }
         if (lg_unlikely(!lg_char_is_alphanumeric(ch_i) && ch_i != '_')) {
-break;
+            break;
         }
 
         is_first = false;
@@ -509,6 +510,7 @@ enum {
     MRV_X(ControlFlowDeclaration) \
     MRV_X(ControlFlowBinding) \
     MRV_X(InvocationExpression) \
+    MRV_X(LambdaExpression) \
     MRV_X(Block) \
 
 typedef uint8_t
@@ -557,6 +559,11 @@ MRV_ASTNodeChildren {
         MRV_ASTNode *ident;
         MRV_ASTNode *arg_list;
     } InvocationExpression;
+
+    struct {
+        MRV_ASTNode *decl_arg_list;
+        MRV_ASTNode *body_block;
+    } LambdaExpression;
 
     struct {
         MRV_ASTNode *symbol_declaration;
@@ -947,6 +954,88 @@ mrv_parse_symbol_decl(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
+mrv_parse_decl_arg(MRV_ParserContext *ctx) {
+    MRV_Token peek = mrv_parser_peek(ctx);
+    
+    MRV_ASTNode *name;
+    if (peek.kind == MRV_TokenKind_Ident) {
+        name = mrv_parse_other_ident(ctx);
+    } else {
+        name = mrv_parse_symbol_ident(ctx);
+    }
+
+    mrv_parser_expect(ctx, MRV_TokenKind_Colon);
+
+    MRV_ASTNode *type;
+    peek = mrv_parser_peek(ctx);
+    if (peek.kind == MRV_TokenKind_BeginHostType) {
+        mrv_parser_consume(ctx);
+        type = mrv_parse_host_type_ident(ctx);
+    } else {
+        type = mrv_parse_other_ident(ctx);
+    }
+    
+    MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){name, type});
+    MRV_ASTNode *node = mrv_parser_mknode(ctx, DeclarationArg, all_span, .ident = name, .type = type);
+
+    return node;
+}
+
+MRV_ASTNode*
+mrv_parse_decl_arg_list(MRV_ParserContext *ctx, bool is_binary) {
+    LG_Scope scope = lg_push_scope(&ctx->scratch);
+
+    uint32_t n_children = 0;
+
+    while (true) {
+        MRV_Token peek = mrv_parser_peek(ctx);
+        switch (peek.kind) {
+        case MRV_TokenKind_CloseParen:
+            mrv_parser_consume(ctx);
+            goto loop_end;
+        case MRV_TokenKind_Comma:
+            mrv_parser_consume(ctx);
+            break;
+        case MRV_TokenKind_Ident:
+        case MRV_TokenKind_SymbolIdent: {
+            MRV_ASTNode *arg = mrv_parse_decl_arg(ctx);
+            mrv_parser_nrs_push(ctx, arg);
+            n_children++;
+            break;
+        }
+        default:
+            mrv_parser_unexpected_token(ctx, peek, MRV_ASTNodeKind_DeclarationArgList);
+            mrv_parser_consume(ctx);
+            goto loop_end;
+        }
+    }
+loop_end:;
+
+    MRV_ASTNode **children = mrv_parser_nrs_unwind_cpy(ctx, n_children);
+    MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
+
+    if (n_children > 2 && is_binary) {
+        mrv_report_error(&ctx->err, all_span, lg_str8_lit(
+            "all operators must be pure three-address code\n"
+            "this argument list has %{i64} arguments"
+        ), n_children);
+        return mrv_parser_nil_node(ctx);
+    }
+
+    MRV_ASTNode *node = mrv_parser_mknode(
+        ctx,
+        DeclarationArgList,
+        all_span,
+        .args = children,
+        .n_args = n_children
+    );
+
+    lg_pop_scope(&ctx->scratch, scope);
+
+    return node;
+}
+
+MRV_ASTNode*
 mrv_parse_invocation_arg_list(MRV_ParserContext *ctx) {
     LG_Scope scope = lg_push_scope(&ctx->scratch);
 
@@ -1032,6 +1121,25 @@ mrv_parse_invocation_expr(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
+mrv_parse_lambda_expr(MRV_ParserContext *ctx) {
+    mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
+    MRV_ASTNode *decl_arg_list = mrv_parse_decl_arg_list(ctx, true);
+    mrv_parser_expect(ctx, MRV_TokenKind_OpenBrace);
+    MRV_ASTNode *body_block = mrv_parse_block(ctx);
+
+    MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){decl_arg_list, body_block});
+    MRV_ASTNode *node = mrv_parser_mknode(
+        ctx,
+        LambdaExpression,
+        all_span,
+        .decl_arg_list = decl_arg_list,
+        .body_block = body_block,
+    );
+
+    return node;
+}
+
+MRV_ASTNode*
 mrv_parse_control_flow_binding(MRV_ParserContext *ctx) {
     MRV_ASTNode *symbol_decl = mrv_parse_symbol_decl(ctx);
     mrv_parser_expect(ctx, MRV_TokenKind_CloseParen);
@@ -1087,7 +1195,16 @@ MRV_ASTNode*
 mrv_parse_assignment_statement(MRV_ParserContext *ctx) {
     MRV_ASTNode *symbol_decl = mrv_parse_symbol_decl(ctx);
     mrv_parser_expect(ctx, MRV_TokenKind_Equals);
-    MRV_ASTNode *expr = mrv_parse_invocation_expr(ctx);
+
+    MRV_Token peek = mrv_parser_peek(ctx);
+
+    MRV_ASTNode *expr;
+    if (peek.kind == MRV_TokenKind_Lambda) {
+        mrv_parser_consume(ctx);
+        expr = mrv_parse_lambda_expr(ctx);
+    } else {
+        expr = mrv_parse_invocation_expr(ctx);
+    }
     mrv_parser_expect(ctx, MRV_TokenKind_Semicolon);
 
     MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){symbol_decl, expr});
@@ -1143,79 +1260,6 @@ loop_end:;
     MRV_ASTNode *node = mrv_parser_mknode(ctx, Block, all_span, .n_statements = n_children, .statements = children);
 
     lg_pop_scope(&ctx->scratch, scope);
-    return node;
-}
-
-MRV_ASTNode*
-mrv_parse_decl_arg(MRV_ParserContext *ctx) {
-    MRV_ASTNode* name = mrv_parse_other_ident(ctx);
-    mrv_parser_expect(ctx, MRV_TokenKind_Colon);
-
-    MRV_ASTNode *type;
-    MRV_Token peek = mrv_parser_peek(ctx);
-    if (peek.kind == MRV_TokenKind_BeginHostType) {
-        mrv_parser_consume(ctx);
-        type = mrv_parse_host_type_ident(ctx);
-    } else {
-        type = mrv_parse_other_ident(ctx);
-    }
-    
-    MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){name, type});
-    MRV_ASTNode *node = mrv_parser_mknode(ctx, DeclarationArg, all_span, .ident = name, .type = type);
-
-    return node;
-}
-
-MRV_ASTNode*
-mrv_parse_decl_arg_list(MRV_ParserContext *ctx, bool is_binary) {
-    LG_Scope scope = lg_push_scope(&ctx->scratch);
-
-    uint32_t n_children = 0;
-
-    while (true) {
-        MRV_Token peek = mrv_parser_peek(ctx);
-        switch (peek.kind) {
-        case MRV_TokenKind_CloseParen:
-            mrv_parser_consume(ctx);
-            goto loop_end;
-        case MRV_TokenKind_Comma:
-            mrv_parser_consume(ctx);
-            break;
-        case MRV_TokenKind_Ident: {
-            MRV_ASTNode *arg = mrv_parse_decl_arg(ctx);
-            mrv_parser_nrs_push(ctx, arg);
-            n_children++;
-            break;
-        }
-        default:
-            mrv_parser_unexpected_token(ctx, peek, MRV_ASTNodeKind_DeclarationArgList);
-            mrv_parser_consume(ctx);
-            goto loop_end;
-        }
-    }
-loop_end:;
-
-    MRV_ASTNode **children = mrv_parser_nrs_unwind_cpy(ctx, n_children);
-    MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
-
-    if (n_children > 2 && is_binary) {
-        mrv_report_error(&ctx->err, all_span, lg_str8_lit(
-            "all operators must be pure three-address code\n"
-            "this argument list has %{i64} arguments"
-        ), n_children);
-        return mrv_parser_nil_node(ctx);
-    }
-
-    MRV_ASTNode *node = mrv_parser_mknode(
-        ctx,
-        DeclarationArgList,
-        all_span,
-        .args = children,
-        .n_args = n_children
-    );
-
-    lg_pop_scope(&ctx->scratch, scope);
-
     return node;
 }
 
@@ -1592,6 +1636,11 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
             mrv_ast_dump_r(ctx, self, as.InvocationExpression.arg_list);
             break;
 
+        case MRV_ASTNodeKind_LambdaExpression:
+            mrv_ast_dump_r(ctx, self, as.LambdaExpression.body_block);
+            mrv_ast_dump_r(ctx, self, as.LambdaExpression.decl_arg_list);
+            break;
+
         case MRV_ASTNodeKind_ControlFlowStatement:
             mrv_ast_dump_r(ctx, self, as.ControlFlowStatement.invocation);
             mrv_ast_dump_r(ctx, self, as.ControlFlowStatement.cf_binding);
@@ -1727,7 +1776,7 @@ MRV_Inst {
         MRV_Inst_SSA          ssa;
         MRV_Inst_ControlFlow  control_flow;
         MRV_Inst_Block        block;
-    };
+    } as;
 } MRV_Inst;
 
 typedef struct 
@@ -1866,6 +1915,7 @@ mrv_sema_traverse_children(
         for (size_t i = 0; i < as.InvocationArgList.n_args; i++) {
             lg_assert(
                 as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_OtherIdent ||
+                as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_Unit ||
                 as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_SymbolIdent
             );
             next(ctx, as.InvocationArgList.args[i]);
@@ -1946,7 +1996,8 @@ mrv_sema_traverse_children(
 
         lg_assert(
             mrv_ast_is_nil_node(ctx->ast, ident) ||
-            ident->kind == MRV_ASTNodeKind_OtherIdent
+            ident->kind == MRV_ASTNodeKind_OtherIdent ||
+            ident->kind == MRV_ASTNodeKind_SymbolIdent
         );
         lg_assert(
             mrv_ast_is_nil_node(ctx->ast, type) ||
@@ -1969,6 +2020,19 @@ mrv_sema_traverse_children(
 
         next(ctx, ident);
         next(ctx, arg_list);
+
+        break;
+    }
+
+    case MRV_ASTNodeKind_LambdaExpression: {
+        MRV_ASTNode *arg_list = as.LambdaExpression.decl_arg_list;
+        MRV_ASTNode *body_block = as.LambdaExpression.body_block;
+
+        lg_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
+        lg_assert(body_block->kind == MRV_ASTNodeKind_Block);
+
+        next(ctx, arg_list);
+        next(ctx, body_block);
 
         break;
     }
@@ -2075,7 +2139,6 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     case MRV_ASTNodeKind_TypeDeclaration: {
         lg_str8 ident = mrv_span_to_str8(self->children_as.TypeDeclaration.ident->span, ctx->text);
-        lg_unreachable("TODO");
 
         size_t idx;
         bool found;
@@ -2476,7 +2539,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         stream->insts[*last_inst_idx] = (MRV_Inst){
             .kind = MRV_InstKind_SSA,
-            .ssa = {
+            .as.ssa = {
                 .new_symbol = symbol_ident->span,
                 .operator_ident = op_ident->span,
                 .left_arg = left_arg,
@@ -2507,7 +2570,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         stream->insts[*last_inst_idx] = (MRV_Inst){
             .kind = MRV_InstKind_SSA,
-            .ssa = {
+            .as.ssa = {
                 .new_symbol = lg_nil(MRV_Span),
                 .operator_ident = op_ident->span,
                 .left_arg = left_arg,

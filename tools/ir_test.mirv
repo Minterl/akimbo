@@ -14,7 +14,7 @@ type ScalarExpression;
 
 type LoopBody = Lambda ((), Coordinate);
 
-operator IntroduceIterationDomain (host : << LG_Polyhedron >>) -> Domain;
+operator IntroduceDomain (host : << LG_Polyhedron >>) -> Domain;
 operator IntroduceAffineTransform (host : << LG_AffineTransform >>) -> AffineTransform;
 operator IntroduceAffineAddressOperator (host : << LG_AffineTransform >>) -> AffineAddressOperator;
 operator IntroduceScalarExpression (host : << LG_ScalarExpression >>) -> ScalarExpression;
@@ -43,7 +43,7 @@ combinator BinaryReduction (
 
     scalar_expression : << LG_ScalarExpression >>,
 ) {
-    %D : Domain = IntroduceIterationDomain(iteration_domain);
+    %D : Domain = IntroduceDomain(iteration_domain);
 
     %y_transform  : AffineTransform = IntroduceAffineTransform(y_atran);
     %x0_transform : AffineTransform = IntroduceAffineTransform(x0_atran);
