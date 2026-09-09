@@ -73,7 +73,6 @@ mrv_report_error(MRV_Error *err, MRV_Span span, lg_str8 fmt, ...) {
     MRV_X(Type,               "type") \
     MRV_X(Operator,           "operator") \
     MRV_X(Combinator,         "combinator") \
-    MRV_X(ControlFlow,        "control_flow") \
     MRV_X(RightArrow,         "->") \
     MRV_X(Ident,              "") \
     MRV_X(SymbolIdent,        "")
@@ -506,9 +505,6 @@ enum {
     MRV_X(InvocationArgList) \
     MRV_X(ExpressionStatement) \
     MRV_X(AssignmentStatement) \
-    MRV_X(ControlFlowStatement) \
-    MRV_X(ControlFlowDeclaration) \
-    MRV_X(ControlFlowBinding) \
     MRV_X(InvocationExpression) \
     MRV_X(LambdaExpression) \
     MRV_X(Block) \
@@ -566,16 +562,6 @@ MRV_ASTNodeChildren {
     } LambdaExpression;
 
     struct {
-        MRV_ASTNode *symbol_declaration;
-    } ControlFlowBinding;
-
-    struct {
-        MRV_ASTNode *invocation;
-        MRV_ASTNode *cf_binding;
-        MRV_ASTNode *block;
-    } ControlFlowStatement;
-
-    struct {
         MRV_ASTNode *symbol_ident;
         MRV_ASTNode *type_ident;
     } SymbolDeclaration;
@@ -599,12 +585,6 @@ MRV_ASTNodeChildren {
         MRV_ASTNode *arg_list;
         MRV_ASTNode *return_type;
     } OperatorDeclaration;
-
-    struct {
-        MRV_ASTNode *ident;
-        MRV_ASTNode *arg_list;
-        MRV_ASTNode *binding_type;
-    } ControlFlowDeclaration;
 
     struct {
         MRV_ASTNode *ident;
@@ -1121,6 +1101,19 @@ mrv_parse_invocation_expr(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
+mrv_parse_expr_statement(MRV_ParserContext *ctx) {
+    MRV_ASTNode *expr = mrv_parse_invocation_expr(ctx);
+    mrv_parser_expect(ctx, MRV_TokenKind_Semicolon);
+    MRV_ASTNode *node = mrv_parser_mknode(
+        ctx,
+        ExpressionStatement,
+        expr->span,
+        .expression = expr,
+    );
+    return node;
+}
+
+MRV_ASTNode*
 mrv_parse_lambda_expr(MRV_ParserContext *ctx) {
     mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
     MRV_ASTNode *decl_arg_list = mrv_parse_decl_arg_list(ctx, true);
@@ -1134,58 +1127,6 @@ mrv_parse_lambda_expr(MRV_ParserContext *ctx) {
         all_span,
         .decl_arg_list = decl_arg_list,
         .body_block = body_block,
-    );
-
-    return node;
-}
-
-MRV_ASTNode*
-mrv_parse_control_flow_binding(MRV_ParserContext *ctx) {
-    MRV_ASTNode *symbol_decl = mrv_parse_symbol_decl(ctx);
-    mrv_parser_expect(ctx, MRV_TokenKind_CloseParen);
-
-    MRV_ASTNode *node = mrv_parser_mknode(
-        ctx,
-        ControlFlowBinding,
-        symbol_decl->span,
-        .symbol_declaration = symbol_decl,
-    );
-
-    return node;
-}
-
-MRV_ASTNode*
-mrv_parse_expr_or_cf_stmt(MRV_ParserContext *ctx) {
-    MRV_ASTNode *invocation = mrv_parse_invocation_expr(ctx);
-
-    MRV_Token peek = mrv_parser_peek(ctx);
-    if (peek.kind == MRV_TokenKind_OpenParen) {
-        mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
-        MRV_ASTNode *binding = mrv_parse_control_flow_binding(ctx);
-
-        mrv_parser_expect(ctx, MRV_TokenKind_OpenBrace);
-        MRV_ASTNode *block = mrv_parse_block(ctx);
-        
-        MRV_Span all_span = mrv_get_bounding_span(ctx, 3, (MRV_ASTNode*[]){invocation, binding, block});
-        MRV_ASTNode *node = mrv_parser_mknode(
-            ctx,
-            ControlFlowStatement,
-            all_span,
-            .invocation = invocation,
-            .cf_binding = binding,
-            .block = block
-        );
-
-        return node;
-    }
-    
-    mrv_parser_expect(ctx, MRV_TokenKind_Semicolon);
-
-    MRV_ASTNode *node = mrv_parser_mknode(
-        ctx,
-        ExpressionStatement,
-        invocation->span,
-        .expression = invocation,
     );
 
     return node;
@@ -1227,14 +1168,15 @@ mrv_parse_block(MRV_ParserContext *ctx) {
 
     while (true) {
         MRV_Token peek = mrv_parser_peek(ctx);
-        if (peek.kind ==  MRV_TokenKind_CloseBrace) {
+
+        switch (peek.kind) {
+        case MRV_TokenKind_CloseBrace: {
             mrv_parser_consume(ctx);
             goto loop_end;
         }
 
-        switch (peek.kind) {
         case MRV_TokenKind_Ident: {
-            MRV_ASTNode *stmt = mrv_parse_expr_or_cf_stmt(ctx);
+            MRV_ASTNode *stmt = mrv_parse_expr_statement(ctx);
             mrv_parser_nrs_push(ctx, stmt);
             n_children++;
             break;
@@ -1368,33 +1310,6 @@ mrv_parse_operator_decl(MRV_ParserContext *ctx) {
 }
 
 MRV_ASTNode*
-mrv_parse_control_flow_decl(MRV_ParserContext *ctx) {
-    MRV_ASTNode *ident = mrv_parse_other_ident(ctx);
-    mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
-    MRV_ASTNode *arg_list = mrv_parse_decl_arg_list(ctx, true);
-    
-    MRV_ASTNode *return_type = mrv_parser_nil_node(ctx);
-    MRV_Token peek = mrv_parser_peek(ctx);
-    if (peek.kind == MRV_TokenKind_RightArrow) {
-        mrv_parser_consume(ctx);
-        return_type = mrv_parse_other_ident(ctx);
-    }
-
-    mrv_parser_expect(ctx, MRV_TokenKind_Semicolon);
-
-    MRV_ASTNode *node = mrv_parser_mknode(
-        ctx,
-        ControlFlowDeclaration,
-        ident->span,
-        .ident = ident,
-        .arg_list = arg_list,
-        .binding_type = return_type,
-    );
-
-    return node;
-}
-
-MRV_ASTNode*
 mrv_parse_program(MRV_ParserContext *ctx) {
     LG_Scope scope = lg_push_scope(&ctx->scratch);
     MRV_ASTNode *root = mrv_parser_nil_node(ctx);
@@ -1432,13 +1347,6 @@ mrv_parse_program(MRV_ParserContext *ctx) {
             mrv_parser_consume(ctx);
             MRV_ASTNode *operator_decl = mrv_parse_operator_decl(ctx);
             mrv_parser_nrs_push(ctx, operator_decl);
-            break;
-        }
-
-        case MRV_TokenKind_ControlFlow: {
-            mrv_parser_consume(ctx);
-            MRV_ASTNode *control_flow_decl = mrv_parse_control_flow_decl(ctx);
-            mrv_parser_nrs_push(ctx, control_flow_decl);
             break;
         }
 
@@ -1604,16 +1512,6 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
             mrv_ast_dump_r(ctx, self, as.OperatorDeclaration.return_type);
             break;
 
-        case MRV_ASTNodeKind_ControlFlowDeclaration:
-            mrv_ast_dump_r(ctx, self, as.ControlFlowDeclaration.ident);
-            mrv_ast_dump_r(ctx, self, as.ControlFlowDeclaration.arg_list);
-            mrv_ast_dump_r(ctx, self, as.ControlFlowDeclaration.binding_type);
-            break;
-
-        case MRV_ASTNodeKind_ControlFlowBinding:
-            mrv_ast_dump_r(ctx, self, as.ControlFlowBinding.symbol_declaration);
-            break;
-
         case MRV_ASTNodeKind_Program:
             for (uint32_t i = 0; i < as.Program.n_children; i++) {
                 mrv_ast_dump_r(ctx, self, as.Program.children[i]);
@@ -1639,12 +1537,6 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
         case MRV_ASTNodeKind_LambdaExpression:
             mrv_ast_dump_r(ctx, self, as.LambdaExpression.body_block);
             mrv_ast_dump_r(ctx, self, as.LambdaExpression.decl_arg_list);
-            break;
-
-        case MRV_ASTNodeKind_ControlFlowStatement:
-            mrv_ast_dump_r(ctx, self, as.ControlFlowStatement.invocation);
-            mrv_ast_dump_r(ctx, self, as.ControlFlowStatement.cf_binding);
-            mrv_ast_dump_r(ctx, self, as.ControlFlowStatement.block);
             break;
 
         case MRV_ASTNodeKind_CombinatorDeclaration:
@@ -2039,7 +1931,6 @@ mrv_sema_traverse_children(
                 as.Program.children[i]->kind == MRV_ASTNodeKind_CombinatorDeclaration ||
                 as.Program.children[i]->kind == MRV_ASTNodeKind_TypeDeclaration ||
                 as.Program.children[i]->kind == MRV_ASTNodeKind_OperatorDeclaration ||
-                as.Program.children[i]->kind == MRV_ASTNodeKind_ControlFlowDeclaration ||
                 as.Program.children[i]->kind == MRV_ASTNodeKind_LanguageDeclaration
             );
             next(ctx, as.Program.children[i]);
@@ -2117,24 +2008,6 @@ mrv_sema_traverse_children(
         break;
     }
 
-    case MRV_ASTNodeKind_ControlFlowDeclaration: {
-        MRV_ASTNode *op_ident = as.ControlFlowDeclaration.ident;
-        MRV_ASTNode *arg_list = as.ControlFlowDeclaration.arg_list;
-        MRV_ASTNode *return_type = as.ControlFlowDeclaration.binding_type;
-
-        bool has_return = !mrv_ast_is_nil_node(ctx->ast, return_type);
-
-        lg_assert(op_ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
-        lg_assert(!has_return || return_type->kind == MRV_ASTNodeKind_OtherIdent);
-
-        next(ctx, op_ident);
-        next(ctx, arg_list);
-        next(ctx, return_type);
-
-        break;
-    }
-
     case MRV_ASTNodeKind_DeclarationArg: {
         MRV_ASTNode *ident = as.DeclarationArg.ident;
         MRV_ASTNode *type = as.DeclarationArg.type;
@@ -2182,28 +2055,6 @@ mrv_sema_traverse_children(
         break;
     }
 
-    case MRV_ASTNodeKind_ControlFlowStatement: {
-        MRV_ASTNode *invocation = as.ControlFlowStatement.invocation;
-        MRV_ASTNode *block = as.ControlFlowStatement.block;
-        MRV_ASTNode *binding = as.ControlFlowStatement.cf_binding;
-
-        lg_assert(invocation->kind == MRV_ASTNodeKind_InvocationExpression);
-        lg_assert(block->kind == MRV_ASTNodeKind_Block);
-        lg_assert(binding->kind == MRV_ASTNodeKind_ControlFlowBinding);
-
-        next(ctx, invocation);
-        next(ctx, block);
-        next(ctx, binding);
-
-        break;
-    }
-
-    case MRV_ASTNodeKind_ControlFlowBinding: {
-        lg_assert(as.ControlFlowBinding.symbol_declaration->kind == MRV_ASTNodeKind_SymbolDeclaration);
-        next(ctx, as.ControlFlowBinding.symbol_declaration);
-        break;
-    }
-
     case MRV_ASTNodeKind_DeclarationArgList:
         for (uint32_t i = 0; i < as.DeclarationArgList.n_args; i++) {
             lg_assert(as.DeclarationArgList.args[i]->kind == MRV_ASTNodeKind_DeclarationArg);
@@ -2214,7 +2065,6 @@ mrv_sema_traverse_children(
     case MRV_ASTNodeKind_Block:
         for (uint32_t i = 0; i < as.Block.n_statements; i++) {
             lg_assert(
-                as.Block.statements[i]->kind == MRV_ASTNodeKind_ControlFlowStatement ||
                 as.Block.statements[i]->kind == MRV_ASTNodeKind_AssignmentStatement ||
                 as.Block.statements[i]->kind == MRV_ASTNodeKind_ExpressionStatement
             );
@@ -2436,144 +2286,6 @@ mrv_sema_record_op_and_cf_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         ctx->ldesc.entries[op_idx].as.operator.right_arg_name = arg_names[1];
         ctx->ldesc.entries[op_idx].as.operator.right_arg_type = arg_types[1];
         ctx->ldesc.entries[op_idx].as.operator.return_type = return_type_ident;
-
-        break;
-    }
-
-    case MRV_ASTNodeKind_ControlFlowDeclaration: {
-        LG_StatusKind status = LG_StatusKind_OK;
-
-        MRV_ASTNode *feature_name = as.ControlFlowDeclaration.ident;
-        MRV_ASTNode *arg_list = as.ControlFlowDeclaration.arg_list;
-        MRV_ASTNode *binding_type = as.ControlFlowDeclaration.binding_type;
-
-        bool has_binding = !mrv_ast_is_nil_node(ctx->ast, binding_type);
-
-        lg_str8 feature_name_ident = mrv_span_to_str8(feature_name->span, ctx->text);
-        lg_str8 binding_type_ident = has_binding ?
-            mrv_span_to_str8(binding_type->span, ctx->text) :
-            lg_nil(lg_str8);
-
-        lg_str8 arg_name = {0};
-        lg_str8 arg_type = {0};
-        {
-            size_t n_args = arg_list->children_as.DeclarationArgList.n_args;
-            if (n_args > 1) {
-                mrv_report_error(
-                    &ctx->err,
-                    arg_list->span,
-                    lg_str8_lit(
-                        "control flow feature %{str} declared with %{i64} arguments\n"
-                        "control flow features may not have more than one argument"
-                    ),
-                    feature_name_ident, n_args
-                );
-            }
-
-            if (n_args > 0) {
-                bool found;
-            
-                MRV_Span name_ident_span = arg_list->children_as.DeclarationArgList.args[0]->children_as.DeclarationArg.ident->span;
-                lg_str8 name_ident = mrv_span_to_str8(name_ident_span, ctx->text);
-                MRV_Span type_ident_span = arg_list->children_as.DeclarationArgList.args[0]->children_as.DeclarationArg.type->span;
-                lg_str8 type_ident = mrv_span_to_str8(type_ident_span, ctx->text);
-
-                size_t idx = lg_table_get_str8(&ctx->ldesc.table, type_ident, &found);
-                if (!found) {
-                    mrv_report_error(
-                        &ctx->err,
-                        type_ident_span,
-                        lg_str8_lit("unknown type in args of control flow declaration: %{str}"),
-                        type_ident
-                    );
-                    break;
-                }
-                if (ctx->ldesc.entries[idx].kind != MRV_LanguageDescriptorEntryKind_Type) {
-                    mrv_report_error(
-                        &ctx->err,
-                        type_ident_span,
-                        lg_str8_lit("type %{str} in args of control flow declaration is not a type at all"),
-                        type_ident
-                    );
-                    break;
-                }
-
-                arg_name = name_ident;
-                arg_type = type_ident;
-
-                if (has_binding) {
-                    size_t idx = lg_table_get_str8(&ctx->ldesc.table, binding_type_ident, &found);
-                    if (!found) {
-                        mrv_report_error(
-                            &ctx->err,
-                            binding_type->span,
-                            lg_str8_lit("unknown type in binding type of control flow declaration: %{str}"),
-                            binding_type_ident
-                        );
-                        break;
-                    }
-                    if (ctx->ldesc.entries[idx].kind != MRV_LanguageDescriptorEntryKind_Type) {
-                        mrv_report_error(
-                            &ctx->err,
-                            binding_type->span,
-                            lg_str8_lit("type %{str} in args of control flow declaration is not a type at all"),
-                            binding_type_ident
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-
-        // this is the point where we actually split control flow features into two parts:
-        // 1) the "begin" operator, which creates the binding variable, and
-        // 2) the "end" operator, which consumes said binding varialble.
-        //
-        // the downside of doing it here is that you have to treat the end operators as a special
-        // case during scope resolution.
-        //
-        // the upside, which in this case bears much more weight, is you get to delete a tone of code
-        // for dealing with control flow features during code generation.
-
-        lg_str8 begin_name = {0};
-        status = lg_strcat(&ctx->ldesc.arena, (lg_str8[]){feature_name_ident, lg_str8_lit("Begin")}, 2, &begin_name);
-        lg_assert(status == LG_StatusKind_OK);
-
-        lg_str8 end_name = {0};
-        status = lg_strcat(&ctx->ldesc.arena, (lg_str8[]){feature_name_ident, lg_str8_lit("End")}, 2, &end_name);
-        lg_assert(status == LG_StatusKind_OK);
-
-        size_t begin_idx;
-        size_t end_idx;
-        {
-            bool found;
-            status = lg_table_ensure_str8(&ctx->ldesc.table, begin_name, &begin_idx, &found);
-            lg_assert(status == LG_StatusKind_OK);
-            if (found) {
-                mrv_report_error(
-                    &ctx->err,
-                    self->span,
-                    lg_str8_lit("multiple declarations found for control flow feature %{str}"),
-                    feature_name_ident
-                );
-                break;
-            }
-
-            status = lg_table_ensure_str8(&ctx->ldesc.table, end_name, &end_idx, &found);
-            lg_assert(status == LG_StatusKind_OK);
-            lg_assert(!found);
-        }
-
-        ctx->ldesc.entries[begin_idx].name = begin_name;
-        ctx->ldesc.entries[begin_idx].kind = MRV_LanguageDescriptorEntryKind_Operator;
-        ctx->ldesc.entries[begin_idx].as.operator.left_arg_name = arg_name;
-        ctx->ldesc.entries[begin_idx].as.operator.left_arg_type = arg_type;
-        ctx->ldesc.entries[begin_idx].as.operator.return_type = binding_type_ident;
-
-        ctx->ldesc.entries[end_idx].name = end_name;
-        ctx->ldesc.entries[end_idx].kind = MRV_LanguageDescriptorEntryKind_Operator;
-        ctx->ldesc.entries[end_idx].as.operator.left_arg_name = lg_str8_lit("binding");
-        ctx->ldesc.entries[end_idx].as.operator.left_arg_type = binding_type_ident;
 
         break;
     }
