@@ -1694,8 +1694,8 @@ MRV_InstStream {
     uint32_t len;
     MRV_Inst *insts lg_check_bounds(cap);
 
-    uint32_t max_symbol_id;
-    MRV_SymbolTable *symtab lg_check_bounds(max_symbol_id);
+    uint32_t symtab_cap;
+    MRV_SymbolTable *symtab lg_check_bounds(symtab_cap);
 } MRV_InstStream;
 
 typedef struct
@@ -1725,11 +1725,12 @@ mrv_istream_init(
     MRV_Inst *insts = lg_arena_alloc_array(arena, MRV_Inst, cap);
     lg_assert(insts != NULL);
 
-    MRV_SymbolTable *symtab = lg_arena_alloc_array(arena, MRV_SymbolTable, max_symbol_id);
+    size_t symtab_cap = max_symbol_id + 1;
+    MRV_SymbolTable *symtab = lg_arena_alloc_array(arena, MRV_SymbolTable, symtab_cap);
     lg_assert(symtab != NULL);
 
     istream->cap = cap;
-    istream->max_symbol_id = max_symbol_id;
+    istream->symtab_cap = symtab_cap;
     istream->insts = insts;
     istream->symtab = symtab;
 }
@@ -2306,48 +2307,33 @@ mrv_sema_combinator_do_counting(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     case MRV_ASTNodeKind_ExpressionStatement:
         state->counting_n_insts++;
         break;
-    default:
-        mrv_sema_traverse_children(ctx, self, mrv_sema_combinator_do_counting);
+    case MRV_ASTNodeKind_LambdaExpression:
+        state->counting_max_symbol_id++;
+        break;
+    default:;
     }
+
+    mrv_sema_traverse_children(ctx, self, mrv_sema_combinator_do_counting);
 }
 
 void
-mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
+mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbol new_symbol) {
     MRV_SemaPhaseState *const state = &ctx->phase_state;
 
     MRV_ASTNodeChildren as = self->children_as;
 
     mrv_match_ast_node(self->kind) {
-    case MRV_ASTNodeKind_ExpressionStatement: {
-    case MRV_ASTNodeKind_AssignmentStatement:
-        mrv_sema_traverse_children(ctx, self, mrv_sema_block_to_inst_stream_r);
+    case MRV_ASTNodeKind_InvocationExpression: {
+        lg_assert(as.InvocationExpression.ident->kind == MRV_ASTNodeKind_OtherIdent);
+        lg_assert(as.InvocationExpression.arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
 
-        size_t n_args = 0;
-        MRV_ASTNode *symbol_ident = NULL;
-        MRV_ASTNode *symbol_type_ident = NULL;
-        MRV_ASTNode *op_ident = NULL;
-        MRV_ASTNode *arg_list = NULL;
-        lg_str8 symbol_ident_str = {0};
-        lg_str8 symbol_type_ident_str = {0};
-        if (self->kind == MRV_ASTNodeKind_AssignmentStatement) {
-            n_args = as.AssignmentStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
-            symbol_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.symbol_ident;
-            symbol_type_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.type_ident;
-            op_ident = as.AssignmentStatement.expression->children_as.InvocationExpression.ident;
-            arg_list = as.AssignmentStatement.expression->children_as.InvocationExpression.arg_list;
-            symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
-            symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
-        } else {
-            n_args = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
-            op_ident = as.ExpressionStatement.expression->children_as.InvocationExpression.ident;
-            arg_list = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list;
-        }
+        size_t n_args = as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
+        MRV_ASTNode *op_ident = as.InvocationExpression.ident;
+        MRV_ASTNode *arg_list = as.InvocationExpression.arg_list;
 
         lg_assert(op_ident != NULL);
         lg_str8 op_ident_str = mrv_span_to_str8(op_ident->span, ctx->text);
 
-        // we have to check type type constraints here b/c they get erased in the instruction stream,
-        // which inadvertently requires us to check these few other things here too.
         size_t operator_ldesc_idx;
         {
             bool found;
@@ -2370,38 +2356,18 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 );
                 return;
             }
+        }
 
-            lg_str8 ret_type_str = ctx->ldesc.entries[operator_ldesc_idx].as.operator.return_type;
-            if (ret_type_str.len == 0) {
-                mrv_report_error(
-                    &ctx->err,
-                    op_ident->span,
-                    lg_str8_lit(
-                        "attempted to bind a symbol to the result of the operator %{str}, which returns nothing\n"
-                        "you cannot bind symbols to nothing"
-                    ),
-                    op_ident_str
-                );
-                return;
-            }
-            if (
-                lg_strcmp(ret_type_str, symbol_type_ident_str) != 0 && 
-                self->kind == MRV_ASTNodeKind_AssignmentStatement
-            ) {
-                mrv_report_error(
-                    &ctx->err,
-                    op_ident->span,
-                    lg_str8_lit(
-                        "attempted to bind the symbol %{str} of type %{str} the return value of the operator %{str},"
-                        "which actually returns type %{str}\n"
-                        "change the type of %{str} to %{str}"
-                    ),
-                    symbol_ident_str, symbol_type_ident_str, op_ident_str,
-                    ret_type_str, 
-                    symbol_type_ident_str, ret_type_str
-                );
-                return;
-            }
+        if (n_args > 2) {
+            mrv_report_error(
+                &ctx->err,
+                self->span,
+                lg_str8_lit(
+                    "operator %{str} passed more than two arguments\n"
+                    "operators may have a maximum of two arguments"
+                ), op_ident_str
+            );
+            return;
         }
 
         MRV_Symbol left_arg_symbol = {0};
@@ -2442,12 +2408,6 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             }
         }
 
-        MRV_Symbol new_symbol = {0};
-        if (self->kind == MRV_ASTNodeKind_AssignmentStatement) {
-            lg_assert(state->nrstack.nodes != NULL);
-            new_symbol = mrv_nrstack_push(&state->nrstack, symbol_ident_str);
-        }
-
         lg_assert(state->istream != NULL);
         mrv_istream_append(state->istream, (MRV_Inst){
             .kind = MRV_InstKind_Invocation,
@@ -2462,23 +2422,57 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         break;
     }
 
-    case MRV_ASTNodeKind_InvocationExpression: {
-        MRV_ASTNode *op_ident = as.InvocationExpression.ident;
-        lg_str8 op_ident_str = mrv_span_to_str8(op_ident->span, ctx->text);
+    case MRV_ASTNodeKind_LambdaExpression:
+        break;
 
-        lg_assert(as.InvocationExpression.arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
-        size_t n_args = as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
-        if (n_args > 2) {
-            mrv_report_error(
-                &ctx->err,
-                self->span,
-                lg_str8_lit(
-                    "operator %{str} passed more than two arguments\n"
-                    "operators may have a maximum of two arguments"
-                ), op_ident_str
-            );
-            return;
+    default:
+        lg_unreachable();
+        break;
+    }
+}
+
+void
+mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
+    MRV_SemaPhaseState *const state = &ctx->phase_state;
+
+    MRV_ASTNodeChildren as = self->children_as;
+
+    mrv_match_ast_node(self->kind) {
+    case MRV_ASTNodeKind_AssignmentStatement: {
+        mrv_sema_traverse_children(ctx, self, mrv_sema_block_to_inst_stream_r);
+
+        MRV_ASTNode *symbol_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.symbol_ident;
+        MRV_ASTNode *symbol_type_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.type_ident;
+        lg_str8 symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
+        lg_str8 symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
+
+        // we're not actually checking that the type is what it should be here, just that it exists at all so
+        // we can get this reference
+        MRV_LanguageDescriptorRef type_ref;
+        {
+            bool found;
+            size_t type_ldesc_idx;
+            LG_StatusKind status = lg_table_ensure_str8(&ctx->ldesc.table, symbol_type_ident_str, &type_ldesc_idx, &found);
+            lg_assert(status == LG_StatusKind_OK);
+            if (!found) {
+                mrv_report_error(
+                    &ctx->err,
+                    symbol_type_ident->span,
+                    lg_str8_lit("unknown type %{str} found in assignment to symbol %{str}"),
+                    symbol_type_ident_str, symbol_ident_str
+                );
+                return;
+            }
+
+            type_ref = (MRV_LanguageDescriptorRef){ .idx = type_ldesc_idx };
         }
+
+        MRV_Symbol new_symbol = {0};
+        lg_assert(state->nrstack.nodes != NULL);
+        new_symbol = mrv_nrstack_push(&state->nrstack, symbol_ident_str);
+
+        state->istream->symtab[new_symbol.id].type = type_ref;
+        mrv_sema_append_inst_for_expr(ctx, as.AssignmentStatement.expression, new_symbol);
 
         break;
     }
