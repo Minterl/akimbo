@@ -1729,7 +1729,7 @@ mrv_ast_dump(MRV_AST *ast, LG_Writer *writer, lg_str8 text) {
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// the meta-ir ir ir
+/// the meta-ir ir ir & some helpers
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1738,10 +1738,16 @@ MRV_InstKind;
 enum 
 MRV_InstKind {
     MRV_InstKind_NOP,
-    MRV_InstKind_SSA,
-    MRV_InstKind_ControlFlow,
-    MRV_InstKind_Block,
+    MRV_InstKind_Invocation,
+    MRV_InstKind_Arg,
+    MRV_InstKind_Lambda,
 };
+
+/// 0 represents no symbol, or an invalid symbol
+typedef struct
+MRV_Symbol {
+    uint32_t id;
+} MRV_Symbol;
 
 typedef struct
 MRV_InstRef {
@@ -1749,41 +1755,186 @@ MRV_InstRef {
 } MRV_InstRef;
 
 typedef struct
-MRV_Inst_SSA {
-    MRV_Span new_symbol;
-    MRV_Span operator_ident;
-    MRV_Span left_arg;
-    MRV_Span right_arg;
-} MRV_Inst_SSA;
+MRV_LanguageDescriptorRef {
+    uint32_t idx;
+} MRV_LanguageDescriptorRef;
 
 typedef struct
-MRV_Inst_ControlFlow {
-    MRV_Span cf_ident;
-    MRV_Span left_arg;
-    MRV_Span right_arg;
-    MRV_InstRef block;
-} MRV_Inst_ControlFlow;
+MRV_Inst_Invocation {
+    MRV_Symbol                 new_symbol;
+    MRV_LanguageDescriptorRef  operator;
+    MRV_Symbol                 left_arg;
+    MRV_Symbol                 right_arg;
+} MRV_Inst_Invocation;
 
 typedef struct
-MRV_Inst_Block {
-    uint32_t len;
-} MRV_Inst_Block;
+MRV_Inst_Arg {
+    MRV_Symbol sym;
+} MRV_Inst_Arg;
+
+typedef struct
+MRV_Inst_Lambda {
+    MRV_Symbol  new_symbol;
+    uint32_t    args_len;
+    uint32_t    body_len;
+} MRV_Inst_Lambda;
 
 typedef struct 
 MRV_Inst {
     MRV_InstKind kind;
     union {
-        MRV_Inst_SSA          ssa;
-        MRV_Inst_ControlFlow  control_flow;
-        MRV_Inst_Block        block;
+        MRV_Inst_Invocation  invocation;
+        MRV_Inst_Arg         arg;
+        MRV_Inst_Lambda      lambda;
     } as;
 } MRV_Inst;
 
 typedef struct 
+MRV_SymbolTable {
+    MRV_Span ident_span;
+    MRV_LanguageDescriptorRef type;
+    uint8_t scope_depth;
+} MRV_SymbolTable;
+
+typedef struct 
 MRV_InstStream {
-    uint32_t n_insts;
-    MRV_Inst *insts lg_check_bounds(n_insts);
+    uint32_t cap;
+    uint32_t len;
+    MRV_Inst *insts lg_check_bounds(cap);
+
+    uint32_t max_symbol_id;
+    MRV_SymbolTable *symtab lg_check_bounds(max_symbol_id);
 } MRV_InstStream;
+
+typedef struct
+MRV_NameResolutionStackNode {
+    lg_str8 str_ident;
+    MRV_Symbol symbol;
+    uint32_t scope_depth;
+} MRV_NameResolutionStackNode;
+
+typedef struct 
+MRV_NameResolutionStack {
+    uint32_t next_symbol_id;
+    uint32_t max_height_cap;
+    uint32_t current_height;
+    MRV_NameResolutionStackNode *nodes lg_check_bounds(max_height_cap);
+} MRV_NameResolutionStack;
+
+void
+mrv_istream_init(
+    MRV_InstStream *istream,
+    LG_Arena *arena,
+    uint32_t cap,
+    uint32_t max_symbol_id
+) {
+    lg_memzero(istream, sizeof(MRV_InstStream));
+
+    MRV_Inst *insts = lg_arena_alloc_array(arena, MRV_Inst, cap);
+    lg_assert(insts != NULL);
+
+    MRV_SymbolTable *symtab = lg_arena_alloc_array(arena, MRV_SymbolTable, max_symbol_id);
+    lg_assert(symtab != NULL);
+
+    istream->cap = cap;
+    istream->max_symbol_id = max_symbol_id;
+    istream->insts = insts;
+    istream->symtab = symtab;
+}
+
+void
+mrv_istream_append(
+    MRV_InstStream *istream,
+    MRV_Inst inst
+) {
+    lg_assert(istream->len + 1 < istream->cap);
+    istream->insts[istream->len] = inst;
+    istream->len++;
+}
+
+void
+mrv_nrstack_init(MRV_NameResolutionStack *nrstack, LG_Arena *arena, uint32_t max_height_cap) {
+    MRV_NameResolutionStackNode *nodes = lg_arena_alloc_array(arena, MRV_NameResolutionStackNode, max_height_cap);
+    lg_assert(nodes != NULL);
+
+    lg_memzero(nrstack, sizeof(MRV_NameResolutionStack));
+    nrstack->nodes = nodes;
+    nrstack->max_height_cap = max_height_cap;
+}
+
+MRV_Symbol
+mrv_nrstack_push(
+    MRV_NameResolutionStack *nrstack,
+    lg_str8 str_ident
+) {
+    lg_assert(nrstack != NULL);
+    lg_assert(nrstack->current_height + 1 <= nrstack->max_height_cap);
+
+    uint32_t depth = 0;
+    if (nrstack->current_height > 0) {
+        depth = nrstack->nodes[nrstack->current_height - 1].scope_depth;
+    }
+
+    // inc. first s.t 0 is an invalid symbol id
+    nrstack->next_symbol_id++;
+
+    MRV_Symbol sym = { .id = nrstack->next_symbol_id };
+    nrstack->nodes[nrstack->current_height] = (MRV_NameResolutionStackNode){
+        .scope_depth = depth,
+        .str_ident = str_ident,
+        .symbol = sym,
+    };
+
+    nrstack->current_height++;
+
+    return sym;
+}
+
+MRV_Symbol
+mrv_nrstack_find_name(
+    MRV_NameResolutionStack *nrstack,
+    lg_str8 name,
+    bool *lg_nullable out_found
+) {
+    for (uint32_t depth = nrstack->current_height; depth > 0; depth--) {
+        if (lg_strcmp(nrstack->nodes[depth - 1].str_ident, name) == 0) {
+            if (out_found != NULL) {
+                *out_found = true;
+            }
+            return nrstack->nodes[depth - 1].symbol;
+        }
+    }
+    if (out_found != NULL) {
+        *out_found = false;
+    }
+    return lg_nil(MRV_Symbol);
+}
+
+MRV_Symbol
+mrv_nrstack_push_first_in_scope(
+    MRV_NameResolutionStack *nrstack,
+    lg_str8 str_ident
+) {
+    lg_assert(nrstack != NULL);
+    MRV_Symbol sym = mrv_nrstack_push(nrstack, str_ident);
+    nrstack->nodes[nrstack->current_height - 1].scope_depth++;
+    return sym;
+}
+
+void
+mrv_nrstack_pop_scope(MRV_NameResolutionStack *nrstack) {
+    lg_assert(nrstack != NULL);
+
+    uint32_t depth = 0;
+    if (nrstack->current_height > 0) {
+        depth = nrstack->nodes[nrstack->current_height - 1].scope_depth;
+    }
+
+    while (
+        nrstack->nodes[nrstack->current_height - 1].scope_depth == depth &&
+        nrstack->current_height > 0
+    ) { nrstack->current_height--; }
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1809,12 +1960,6 @@ enum {
     MRV_LanguageDescriptorEntryKind_Combinator,
 };
 
-typedef struct 
-MRV_CombinatorArg {
-    lg_str8 ident;
-    lg_str8 type;
-} MRV_CombinatorArg;
-
 typedef struct
 MRV_LanguageDescriptorEntry {
     MRV_LanguageDescriptorEntryKind kind;
@@ -1835,9 +1980,7 @@ MRV_LanguageDescriptorEntry {
         } operator;
 
         struct {
-            size_t n_args;
-            MRV_CombinatorArg *args lg_check_bounds(n_args);
-            MRV_InstStream body;
+            MRV_InstStream istream;
         } combinator;
     } as;
 } MRV_LanguageDescriptorEntry;
@@ -1856,8 +1999,10 @@ MRV_LanguageDescriptor {
 typedef struct 
 MRV_SemaPhaseState {
     size_t           counting_n_insts;
-    size_t           last_inst_idx;
-    MRV_InstStream  *inst_stream;
+    size_t           counting_max_symbol_id;
+    MRV_InstStream  *istream;
+
+    MRV_NameResolutionStack nrstack;
 } MRV_SemaPhaseState;
 
 typedef struct
@@ -1866,7 +2011,7 @@ MRV_SemaContext {
     lg_str8                 text;
     MRV_LanguageDescriptor  ldesc;
     MRV_Error               err;
-
+    LG_Arena               *scratch;
     MRV_SemaPhaseState      phase_state;
 } MRV_SemaContext;
 
@@ -2438,45 +2583,63 @@ mrv_sema_record_op_and_cf_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 }
 
 void
-mrv_sema_count_block_insts_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
-    if (
-        self->kind == MRV_ASTNodeKind_AssignmentStatement ||
-        self->kind == MRV_ASTNodeKind_ExpressionStatement
-    ) {
-        ctx->phase_state.counting_n_insts++;
-    } else if (self->kind == MRV_ASTNodeKind_ControlFlowStatement) {
-        // +1 for the Inst_ControlFlow and one for the Inst_Block
-        ctx->phase_state.counting_n_insts += 2;
-    } else {
-        mrv_sema_traverse_children(ctx, self, mrv_sema_count_block_insts_r);
+mrv_sema_combinator_do_counting(MRV_SemaContext *ctx, MRV_ASTNode *self) {
+    MRV_SemaPhaseState *const state = &ctx->phase_state;
+
+    mrv_match_ast_node(self->kind) {
+    case MRV_ASTNodeKind_AssignmentStatement:
+        state->counting_max_symbol_id++;
+        state->counting_n_insts++;
+        break;
+    case MRV_ASTNodeKind_ExpressionStatement:
+        state->counting_n_insts++;
+        break;
+    default:
+        mrv_sema_traverse_children(ctx, self, mrv_sema_combinator_do_counting);
     }
 }
 
 void
 mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
-    size_t *const restrict last_inst_idx = &ctx->phase_state.last_inst_idx;
-    MRV_InstStream *const restrict stream = ctx->phase_state.inst_stream;
+    MRV_SemaPhaseState *const state = &ctx->phase_state;
 
     MRV_ASTNodeChildren as = self->children_as;
 
     mrv_match_ast_node(self->kind) {
-    case MRV_ASTNodeKind_AssignmentStatement: {
+    case MRV_ASTNodeKind_ExpressionStatement: {
+    case MRV_ASTNodeKind_AssignmentStatement:
         mrv_sema_traverse_children(ctx, self, mrv_sema_block_to_inst_stream_r);
 
-        MRV_ASTNode *symbol_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.symbol_ident;
-        MRV_ASTNode *symbol_type_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.type_ident;
-        MRV_ASTNode *op_ident = as.AssignmentStatement.expression->children_as.InvocationExpression.ident;
-        MRV_ASTNode *arg_list = as.AssignmentStatement.expression->children_as.InvocationExpression.ident;
+        size_t n_args = 0;
+        MRV_ASTNode *symbol_ident = NULL;
+        MRV_ASTNode *symbol_type_ident = NULL;
+        MRV_ASTNode *op_ident = NULL;
+        MRV_ASTNode *arg_list = NULL;
+        lg_str8 symbol_ident_str = {0};
+        lg_str8 symbol_type_ident_str = {0};
+        if (self->kind == MRV_ASTNodeKind_AssignmentStatement) {
+            n_args = as.AssignmentStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
+            symbol_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.symbol_ident;
+            symbol_type_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.type_ident;
+            op_ident = as.AssignmentStatement.expression->children_as.InvocationExpression.ident;
+            arg_list = as.AssignmentStatement.expression->children_as.InvocationExpression.arg_list;
+            symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
+            symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
+        } else {
+            n_args = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
+            op_ident = as.ExpressionStatement.expression->children_as.InvocationExpression.ident;
+            arg_list = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list;
+        }
 
+        lg_assert(op_ident != NULL);
         lg_str8 op_ident_str = mrv_span_to_str8(op_ident->span, ctx->text);
-        lg_str8 symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
-        lg_str8 symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
 
         // we have to check type type constraints here b/c they get erased in the instruction stream,
         // which inadvertently requires us to check these few other things here too.
+        size_t operator_ldesc_idx;
         {
             bool found;
-            size_t op_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, op_ident_str, &found);
+            operator_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, op_ident_str, &found);
             if (!found) {
                 mrv_report_error(
                     &ctx->err,
@@ -2486,7 +2649,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 );
                 return;
             }
-            if (ctx->ldesc.entries[op_ldesc_idx].kind != MRV_LanguageDescriptorEntryKind_Operator) {
+            if (ctx->ldesc.entries[operator_ldesc_idx].kind != MRV_LanguageDescriptorEntryKind_Operator) {
                 mrv_report_error(
                     &ctx->err,
                     op_ident->span,
@@ -2496,7 +2659,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 return;
             }
 
-            lg_str8 ret_type_str = ctx->ldesc.entries->as.operator.return_type;
+            lg_str8 ret_type_str = ctx->ldesc.entries[operator_ldesc_idx].as.operator.return_type;
             if (ret_type_str.len == 0) {
                 mrv_report_error(
                     &ctx->err,
@@ -2509,7 +2672,10 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 );
                 return;
             }
-            if (lg_strcmp(ret_type_str, symbol_type_ident_str) != 0) {
+            if (
+                lg_strcmp(ret_type_str, symbol_type_ident_str) != 0 && 
+                self->kind == MRV_ASTNodeKind_AssignmentStatement
+            ) {
                 mrv_report_error(
                     &ctx->err,
                     op_ident->span,
@@ -2520,69 +2686,67 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     ),
                     symbol_ident_str, symbol_type_ident_str, op_ident_str,
                     ret_type_str, 
-                    symbol_type_ident, ret_type_str
+                    symbol_type_ident_str, ret_type_str
                 );
                 return;
             }
         }
 
-        size_t n_args = as.AssignmentStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
-
-        MRV_Span left_arg = {0};
-        MRV_Span right_arg = {0};
+        MRV_Symbol left_arg_symbol = {0};
+        MRV_Span left_arg_span = {0};
         if (n_args > 0) {
-            left_arg = arg_list->children_as.InvocationArgList.args[0]->span;
+            left_arg_span = arg_list->children_as.InvocationArgList.args[0]->span;
+            lg_str8 name_str = mrv_span_to_str8(left_arg_span, ctx->text);
+
+            bool found;
+            left_arg_symbol = mrv_nrstack_find_name(&state->nrstack, name_str, &found);
+            if (!found) {
+                mrv_report_error(
+                    &ctx->err,
+                    left_arg_span,
+                    lg_str8_lit("unknown identifier %{str} as first argument to invocation of operator %{str}"),
+                    name_str, op_ident_str
+                );
+                return;
+            }
         }
+
+        MRV_Symbol right_arg_symbol = {0};
+        MRV_Span right_arg_span = {0};
         if (n_args > 1) {
-            right_arg = arg_list->children_as.InvocationArgList.args[1]->span;
+            right_arg_span = arg_list->children_as.InvocationArgList.args[1]->span;
+            lg_str8 name_str = mrv_span_to_str8(right_arg_span, ctx->text);
+
+            bool found;
+            right_arg_symbol = mrv_nrstack_find_name(&state->nrstack, name_str, &found);
+            if (!found) {
+                mrv_report_error(
+                    &ctx->err,
+                    right_arg_span,
+                    lg_str8_lit("unknown identifier %{str} as second argument to invocation of operator %{str}"),
+                    name_str, op_ident_str
+                );
+                return;
+            }
         }
 
-        stream->insts[*last_inst_idx] = (MRV_Inst){
-            .kind = MRV_InstKind_SSA,
-            .as.ssa = {
-                .new_symbol = symbol_ident->span,
-                .operator_ident = op_ident->span,
-                .left_arg = left_arg,
-                .right_arg = right_arg,
+        MRV_Symbol new_symbol = {0};
+        if (self->kind == MRV_ASTNodeKind_AssignmentStatement) {
+            lg_assert(state->nrstack.nodes != NULL);
+            new_symbol = mrv_nrstack_push(&state->nrstack, symbol_ident_str);
+        }
+
+        lg_assert(state->istream != NULL);
+        mrv_istream_append(state->istream, (MRV_Inst){
+            .kind = MRV_InstKind_Invocation,
+            .as.invocation = {
+                .new_symbol = new_symbol,
+                .operator = { .idx = operator_ldesc_idx },
+                .left_arg = left_arg_symbol,
+                .right_arg = right_arg_symbol,
             },
-        };
-        (*last_inst_idx)++;
+        });
 
-        break;
-    }
-
-    case MRV_ASTNodeKind_ExpressionStatement: {
-        mrv_sema_traverse_children(ctx, self, mrv_sema_block_to_inst_stream_r);
-
-        MRV_ASTNode *op_ident = as.ExpressionStatement.expression->children_as.InvocationExpression.ident;
-        MRV_ASTNode *arg_list = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list;
-
-        size_t n_args = as.ExpressionStatement.expression->children_as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
-
-        MRV_Span left_arg = {0};
-        MRV_Span right_arg = {0};
-        if (n_args > 0) {
-            left_arg = arg_list->children_as.InvocationArgList.args[0]->span;
-        }
-        if (n_args > 1) {
-            right_arg = arg_list->children_as.InvocationArgList.args[1]->span;
-        }
-
-        stream->insts[*last_inst_idx] = (MRV_Inst){
-            .kind = MRV_InstKind_SSA,
-            .as.ssa = {
-                .new_symbol = lg_nil(MRV_Span),
-                .operator_ident = op_ident->span,
-                .left_arg = left_arg,
-                .right_arg = right_arg,
-            },
-        };
-        (*last_inst_idx)++;
-
-        break;
-    }
-
-    case MRV_ASTNodeKind_ControlFlowStatement: {
         break;
     }
 
@@ -2619,8 +2783,14 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         return;
     }
 
+    LG_Scope scope = lg_push_scope(ctx->scratch);
+
     LG_StatusKind status;
     MRV_ASTNodeChildren as = self->children_as;
+
+
+    ////////////////////////////////////////////////////////////////////////
+    // ~~ read a few things from the ast ~~ 
 
     MRV_Span ident_span = as.CombinatorDeclaration.ident->span;
     lg_str8 ident = mrv_span_to_str8(ident_span, ctx->text);
@@ -2637,7 +2807,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 lg_str8_lit("found multiple declarations for combinator %{str}"),
                 ident
             );
-            return;
+            goto out;
         }
     }
 
@@ -2653,72 +2823,103 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             lg_str8_lit("combinator %{str} has no arguments\ncombinators must have at least one argument"),
             ident
         );
-        return;
+        goto out;
     }
 
-    for (size_t i = 0; i < n_args; i++) {
-        lg_assert(arg_nodes[i]->kind == MRV_ASTNodeKind_DeclarationArg);
-        MRV_Span arg_ident_span = arg_nodes[i]->children_as.DeclarationArg.ident->span;
-        lg_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
 
-        MRV_Span type_span = arg_nodes[i]->children_as.DeclarationArg.type->span;
-        lg_str8 type = mrv_span_to_str8(type_span, ctx->text);
+    ////////////////////////////////////////////////////////////////////////
+    // ~~ initialize the current phase state ~~ 
 
-        bool found;
-        size_t ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, type, &found);
-        if (!found) {
-            mrv_report_error(
-                &ctx->err,
-                self->span,
-                lg_str8_lit(
-                    "argument %{str} in combinator %{str} has unknown type %{str}\n"
-                ),
-                arg_ident, ident, type
-            );
-            return;
-        }
-        if (ctx->ldesc.entries[ldesc_idx].kind != MRV_LanguageDescriptorEntryKind_Type) {
-            mrv_report_error(
-                &ctx->err,
-                self->span,
-                lg_str8_lit(
-                    "argument %{str} in combinator %{str} has type %{str}, which is not a type at all"
-                ),
-                arg_ident, ident, type
-            );
-            return;
-        }
-        if (ctx->ldesc.entries[ldesc_idx].as.type.type_kind != MRV_TypeKind_Host) {
-            mrv_report_error(
-                &ctx->err,
-                self->span,
-                lg_str8_lit(
-                    "argument %{str} in combinator %{str} has type %{str}, which is not a host type\n"
-                    "all combinator args must be host types"
-                ),
-                arg_ident, ident, type
-            );
-            return;
-        }
-    }
+    MRV_SemaPhaseState *const state = &ctx->phase_state;
 
-    MRV_CombinatorArg *entry_args = lg_arena_alloc_array(&ctx->ldesc.arena, MRV_CombinatorArg, n_args);
-    lg_assert(entry_args != NULL);
+    lg_memzero(state, sizeof(MRV_SemaPhaseState));
+    mrv_sema_combinator_do_counting(ctx, as.CombinatorDeclaration.body);
+    state->counting_max_symbol_id += n_args;
 
+    mrv_istream_init(
+        &entry->as.combinator.istream,
+        &ctx->ldesc.arena,
+        state->counting_n_insts + n_args,
+        state->counting_max_symbol_id
+    );
     entry->kind = MRV_LanguageDescriptorEntryKind_Combinator;
     entry->name = ident;
-    entry->as.combinator.n_args = n_args;
-    entry->as.combinator.args = entry_args;
 
-    for (size_t i = 0; i < n_args; i++) {
-        MRV_Span arg_ident_span = arg_nodes[i]->children_as.DeclarationArg.ident->span;
-        lg_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
+    mrv_nrstack_init(&state->nrstack, ctx->scratch, state->counting_max_symbol_id);
 
-        MRV_Span type_span = arg_nodes[i]->children_as.DeclarationArg.type->span;
-        lg_str8 type = mrv_span_to_str8(type_span, ctx->text);
+    state->istream = &entry->as.combinator.istream;
+    
 
-        entry_args[i].ident = arg_ident;
-        entry_args[i].type = type;
+    ////////////////////////////////////////////////////////////////////////
+    // ~~ record args & traverse body to record everything else ~~ 
+
+    // the istream of a combinator always begins with its args
+    {
+        mrv_istream_append(state->istream, (MRV_Inst){
+            .kind = MRV_InstKind_Lambda,
+            .as.lambda.args_len = n_args,
+            .as.lambda.body_len = state->counting_n_insts,
+        });
+        for (size_t i = 0; i < n_args; i++) {
+            MRV_Span arg_ident_span = arg_nodes[i]->children_as.DeclarationArg.ident->span;
+            lg_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
+
+            MRV_Span arg_type_span = arg_nodes[i]->children_as.DeclarationArg.type->span;
+            lg_str8 arg_type = mrv_span_to_str8(arg_type_span, ctx->text);
+            
+            bool found;
+
+            mrv_nrstack_find_name(&state->nrstack, arg_ident, &found);
+            if (found) {
+                mrv_report_error(
+                    &ctx->err,
+                    arg_ident_span,
+                    lg_str8_lit("multiple arguments found for combinator %{str} with identifier %{str}"),
+                    ident, arg_ident
+                );
+                goto out;
+            }
+
+            size_t ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_type, &found);
+            if (!found) {
+                mrv_report_error(
+                    &ctx->err,
+                    self->span,
+                    lg_str8_lit(
+                        "argument %{str} in combinator %{str} has unknown type %{str}\n"
+                    ),
+                    arg_ident, ident, arg_type
+                );
+                goto out;
+            }
+            if (ctx->ldesc.entries[ldesc_idx].kind != MRV_LanguageDescriptorEntryKind_Type) {
+                mrv_report_error(
+                    &ctx->err,
+                    self->span,
+                    lg_str8_lit(
+                        "argument %{str} in combinator %{str} has type %{str}, which is not a type at all"
+                    ),
+                    arg_ident, ident, arg_type
+                );
+                goto out;
+            }
+            if (ctx->ldesc.entries[ldesc_idx].as.type.type_kind != MRV_TypeKind_Host) {
+                mrv_report_error(
+                    &ctx->err,
+                    self->span,
+                    lg_str8_lit(
+                        "argument %{str} in combinator %{str} has type %{str}, which is not a host type\n"
+                        "all combinator args must be host types"
+                    ),
+                    arg_ident, ident, arg_type
+                );
+                goto out;
+            }
+
+            MRV_Symbol sym = mrv_nrstack_push(&state->nrstack, arg_ident);
+            state->istream->symtab[sym.id].ident_span = arg_ident_span;
+            state->istream->symtab[sym.id].type = (MRV_LanguageDescriptorRef){ .idx = ldesc_idx };
+        }
     }
 
     lg_assert(as.CombinatorDeclaration.body->kind == MRV_ASTNodeKind_Block);
@@ -2733,22 +2934,14 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             ),
             ident
         );
-        return;
+        goto out;
     }
 
-    lg_memzero(&ctx->phase_state, sizeof(MRV_SemaPhaseState));
-    mrv_sema_count_block_insts_r(ctx, as.CombinatorDeclaration.body);
-
-    MRV_InstStream body = {
-        .insts = lg_arena_alloc_array(&ctx->ldesc.arena, MRV_Inst, ctx->phase_state.counting_n_insts),
-        .n_insts = ctx->phase_state.counting_n_insts,
-    };
-    lg_assert(body.insts != NULL);
-
-    ctx->phase_state.inst_stream = &body; 
     mrv_sema_block_to_inst_stream_r(ctx, self);
 
-    entry->as.combinator.body = body;
+out:
+    lg_pop_scope(ctx->scratch, scope);
+    return;
 }
 
 void
@@ -2768,6 +2961,7 @@ mrv_analyze(
     MRV_SemaContext ctx = {
         .ast = ast,
         .text = text,
+        .scratch = &arena,
         .err.writer = err_writer,
     };
 
@@ -2903,6 +3097,7 @@ MRV_SourcegenContext {
     LG_Writer               *source_file_writer;
     MRV_LanguageDescriptor  *ldesc;
     lg_str8                  type_ident_prefix;
+    lg_str8                  text;
 
     struct {
         lg_str8 lang_capitalized;
@@ -3144,13 +3339,30 @@ LG_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
         }
 
         LG_StringList members = {0};
-        for (size_t i = 0; i < entry.as.combinator.n_args; i++) {
-            MRV_CombinatorArg arg = entry.as.combinator.args[i];
+        // the first n arg nodes of the instruction stream are the args of the combinator itself
+        uint32_t i_current_inst = 0;
+        while (
+            entry.as.combinator.istream.insts[i_current_inst].kind != MRV_InstKind_Arg &&
+            i_current_inst < entry.as.combinator.istream.len
+        ) { i_current_inst++; }
+
+        while (
+            entry.as.combinator.istream.insts[i_current_inst].kind == MRV_InstKind_Arg &&
+            i_current_inst < entry.as.combinator.istream.len
+        ) {
+            MRV_Inst_Arg arg = entry.as.combinator.istream.insts[i_current_inst].as.arg;
+            MRV_SymbolTable symtab_entry = entry.as.combinator.istream.symtab[arg.sym.id];
+            MRV_LanguageDescriptorEntry type_entry = ctx->ldesc->entries[symtab_entry.type.idx];
+
+            lg_str8 ident_str = mrv_span_to_str8(symtab_entry.ident_span, ctx->text);
+
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit("\n    "));
-            lg_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, arg.type));
+            lg_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, type_entry.name));
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit(" "));
-            lg_strlist_append(&members, ctx->scratch, arg.ident);
+            lg_strlist_append(&members, ctx->scratch, ident_str);
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit(";"));
+
+            i_current_inst++;
         }
 
         MRV_TmplFieldTable fields[] = {
@@ -3314,11 +3526,13 @@ mrv_gen_source(
     LG_Writer *header_file_writer,
     LG_Writer *source_file_writer,
     LG_Arena *scratch_allocator,
-    MRV_LanguageDescriptor *ldesc
+    MRV_LanguageDescriptor *ldesc,
+    lg_str8 text
 ) {
     MRV_SourcegenContext ctx = {
         .header_file_writer = header_file_writer,
         .source_file_writer = source_file_writer,
+        .text = text,
         .scratch = scratch_allocator,
         .ldesc = ldesc,
     };
@@ -3460,7 +3674,7 @@ main(int32_t argc, char **argv) {
         &ldesc
     );
 
-    mrv_gen_source(&libc_writer, &libc_writer, &scratch_allocator, &ldesc);
+    mrv_gen_source(&libc_writer, &libc_writer, &scratch_allocator, &ldesc, text);
 
     mrv_ldesc_destroy(&ldesc);
 
