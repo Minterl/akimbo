@@ -1735,14 +1735,20 @@ mrv_istream_init(
     istream->symtab = symtab;
 }
 
-void
+/// returns the index of the instruction
+uint32_t
 mrv_istream_append(
     MRV_InstStream *istream,
     MRV_Inst inst
 ) {
     lg_assert(istream->len + 1 < istream->cap);
-    istream->insts[istream->len] = inst;
+
+    uint32_t idx = istream->len;
+
+    istream->insts[idx] = inst;
     istream->len++;
+
+    return idx;
 }
 
 void
@@ -1812,6 +1818,14 @@ mrv_nrstack_push_first_in_scope(
     MRV_Symbol sym = mrv_nrstack_push(nrstack, str_ident);
     nrstack->nodes[nrstack->current_height - 1].scope_depth++;
     return sym;
+}
+
+uint32_t
+mrv_nrstack_get_scope_depth(MRV_NameResolutionStack *nrstack) {
+    lg_assert(nrstack != NULL);
+    return nrstack->current_height > 0 ?
+        nrstack->nodes[nrstack->current_height - 1].scope_depth :
+        0;
 }
 
 void
@@ -2301,13 +2315,19 @@ mrv_sema_combinator_do_counting(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     mrv_match_ast_node(self->kind) {
     case MRV_ASTNodeKind_AssignmentStatement:
-        state->counting_max_symbol_id++;
         state->counting_n_insts++;
         break;
     case MRV_ASTNodeKind_ExpressionStatement:
         state->counting_n_insts++;
         break;
     case MRV_ASTNodeKind_LambdaExpression:
+        state->counting_n_insts++;
+        break;
+    case MRV_ASTNodeKind_DeclarationArg:
+        state->counting_n_insts++;
+        state->counting_max_symbol_id++;
+        break;
+    case MRV_ASTNodeKind_SymbolDeclaration:
         state->counting_max_symbol_id++;
         break;
     default:;
@@ -2315,6 +2335,10 @@ mrv_sema_combinator_do_counting(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     mrv_sema_traverse_children(ctx, self, mrv_sema_combinator_do_counting);
 }
+
+// forward decl. b/c mutual recursion
+void
+mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self);
 
 void
 mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbol new_symbol) {
@@ -2422,8 +2446,75 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
         break;
     }
 
-    case MRV_ASTNodeKind_LambdaExpression:
+    case MRV_ASTNodeKind_LambdaExpression: {
+        MRV_ASTNode *arg_list = as.LambdaExpression.decl_arg_list;
+        size_t n_args = arg_list->children_as.DeclarationArgList.n_args;
+
+        uint32_t lambda_inst_idx = mrv_istream_append(state->istream, (MRV_Inst){
+            .kind = MRV_InstKind_Lambda,
+            .as.lambda = {
+                .args_len = n_args,
+                .body_len = 0, // backpatched
+            },
+        });
+
+        for (uint32_t i = 0; i < n_args; i++) {
+            MRV_ASTNode *arg = arg_list->children_as.DeclarationArgList.args[i];
+            MRV_ASTNode *ident = arg->children_as.DeclarationArg.ident;
+            MRV_ASTNode *type = arg->children_as.DeclarationArg.type;
+
+            lg_str8 ident_str = mrv_span_to_str8(ident->span, ctx->text);
+            lg_str8 type_str = mrv_span_to_str8(type->span, ctx->text);
+
+            MRV_Symbol symbol;
+            if (i == 0) {
+                symbol = mrv_nrstack_push_first_in_scope(&state->nrstack, ident_str);
+            } else {
+                symbol = mrv_nrstack_push(&state->nrstack, ident_str);
+            }
+
+            MRV_LanguageDescriptorRef type_ref;
+            {
+                bool found;
+                size_t type_ldesc_idx;
+                LG_StatusKind status = lg_table_ensure_str8(&ctx->ldesc.table, type_str, &type_ldesc_idx, &found);
+                lg_assert(status == LG_StatusKind_OK);
+                if (!found) {
+                    mrv_report_error(
+                        &ctx->err,
+                        type->span,
+                        lg_str8_lit("unknown type %{str} found in assignment to lambda %{str}"),
+                        type_str, ident_str 
+                    );
+                    return;
+                }
+
+                type_ref = (MRV_LanguageDescriptorRef){ .idx = type_ldesc_idx };
+            }
+
+            state->istream->symtab[symbol.id] = (MRV_SymbolTable){
+                .ident_span = ident->span,
+                .type = type_ref,
+                .scope_depth = mrv_nrstack_get_scope_depth(&state->nrstack),
+            };
+
+            mrv_istream_append(state->istream, (MRV_Inst){
+                .kind = MRV_InstKind_Arg,
+                .as.arg = {
+                    .sym = symbol,
+                },
+            });
+        }
+
+        mrv_sema_block_to_inst_stream_r(ctx, as.LambdaExpression.body_block);
+
+        mrv_nrstack_pop_scope(&state->nrstack);
+
+        uint32_t len = state->istream->len - lambda_inst_idx;
+        state->istream->insts[lambda_inst_idx].as.lambda.body_len = len;
+
         break;
+    }
 
     default:
         lg_unreachable();
@@ -2438,6 +2529,9 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     MRV_ASTNodeChildren as = self->children_as;
 
     mrv_match_ast_node(self->kind) {
+    case MRV_ASTNodeKind_LambdaExpression: // handled above
+        break;
+
     case MRV_ASTNodeKind_AssignmentStatement: {
         mrv_sema_traverse_children(ctx, self, mrv_sema_block_to_inst_stream_r);
 
@@ -2539,8 +2633,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     MRV_SemaPhaseState *const state = &ctx->phase_state;
 
     lg_memzero(state, sizeof(MRV_SemaPhaseState));
-    mrv_sema_combinator_do_counting(ctx, as.CombinatorDeclaration.body);
-    state->counting_max_symbol_id += n_args;
+    mrv_sema_combinator_do_counting(ctx, self);
 
     mrv_istream_init(
         &entry->as.combinator.istream,
@@ -2586,43 +2679,31 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 goto out;
             }
 
-            size_t ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_type, &found);
-            if (!found) {
-                mrv_report_error(
-                    &ctx->err,
-                    self->span,
-                    lg_str8_lit(
-                        "argument %{str} in combinator %{str} has unknown type %{str}\n"
-                    ),
-                    arg_ident, ident, arg_type
-                );
-                goto out;
-            }
-            if (ctx->ldesc.entries[ldesc_idx].kind != MRV_LanguageDescriptorEntryKind_Type) {
-                mrv_report_error(
-                    &ctx->err,
-                    self->span,
-                    lg_str8_lit(
-                        "argument %{str} in combinator %{str} has type %{str}, which is not a type at all"
-                    ),
-                    arg_ident, ident, arg_type
-                );
-                goto out;
-            }
-            if (ctx->ldesc.entries[ldesc_idx].as.type.type_kind != MRV_TypeKind_Host) {
-                mrv_report_error(
-                    &ctx->err,
-                    self->span,
-                    lg_str8_lit(
-                        "argument %{str} in combinator %{str} has type %{str}, which is not a host type\n"
-                        "all combinator args must be host types"
-                    ),
-                    arg_ident, ident, arg_type
-                );
-                goto out;
+            MRV_LanguageDescriptorRef type_ref;
+            {
+                size_t ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_type, &found);
+                if (!found) {
+                    mrv_report_error(
+                        &ctx->err,
+                        self->span,
+                        lg_str8_lit(
+                            "argument %{str} in combinator %{str} has unknown type %{str}\n"
+                        ),
+                        arg_ident, ident, arg_type
+                    );
+                    goto out;
+                }
+
+                type_ref = (MRV_LanguageDescriptorRef){ .idx = ldesc_idx };
             }
 
             MRV_Symbol sym = mrv_nrstack_push(&state->nrstack, arg_ident);
+
+            state->istream->symtab[sym.id] = (MRV_SymbolTable){
+                .ident_span = arg_ident_span,
+                .type = type_ref,
+                .scope_depth = mrv_nrstack_get_scope_depth(&state->nrstack),
+            };
             state->istream->symtab[sym.id].ident_span = arg_ident_span;
             state->istream->symtab[sym.id].type = (MRV_LanguageDescriptorRef){ .idx = ldesc_idx };
         }
