@@ -477,6 +477,9 @@ LG_TableIter {
     size_t    next_idx;
 } LG_TableIter;
 
+lg_force_inline uint32_t 
+lg_mmh(uint8_t *key, size_t len);
+
 LG_StatusKind 
 lg_table_init(LG_Table *table, LG_Arena *arena, size_t cap);
 

@@ -1713,6 +1713,8 @@ MRV_NameResolutionStack {
     MRV_NameResolutionStackNode *nodes lg_check_bounds(max_height_cap);
 } MRV_NameResolutionStack;
 
+#define mrv_match_inst(kind) switch ((enum MRV_InstKind)kind)
+
 void
 mrv_istream_init(
     MRV_InstStream *istream,
@@ -3008,6 +3010,90 @@ mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, lg_str8 name) {
     return cat;
 }
 
+#define MRV_DEF_C_KEYWORDS \
+    MRV_X(char) \
+    MRV_X(int) \
+    MRV_X(float) \
+    MRV_X(double) \
+    MRV_X(short) \
+    MRV_X(long) \
+    MRV_X(signed) \
+    MRV_X(unsigned) \
+    MRV_X(void) \
+    MRV_X(if) \
+    MRV_X(else) \
+    MRV_X(switch) \
+    MRV_X(case) \
+    MRV_X(default) \
+    MRV_X(for) \
+    MRV_X(while) \
+    MRV_X(do) \
+    MRV_X(break) \
+    MRV_X(continue) \
+    MRV_X(goto) \
+    MRV_X(return) \
+    MRV_X(auto) \
+    MRV_X(register) \
+    MRV_X(static) \
+    MRV_X(extern) \
+    MRV_X(struct) \
+    MRV_X(union) \
+    MRV_X(enum) \
+    MRV_X(typedef) \
+    MRV_X(const) \
+    MRV_X(volatile) \
+    MRV_X(sizeof)
+
+const struct {
+    lg_str8 str;
+    uint32_t hash;
+}
+MRV_C_KEYWORDS[] = {
+#   define MRV_X(kw) { .str = lg_str8_lit(#kw), .hash = lg_hash_lit_16(#kw) },
+    MRV_DEF_C_KEYWORDS
+#   undef MRV_X
+};
+const uint32_t 
+MRV_N_C_KEYWORDS = sizeof(MRV_C_KEYWORDS) / sizeof(MRV_C_KEYWORDS[0]);
+
+/// allocates a "safe" version of some (currently pascal case) identifier that follows two rules:
+/// 1) it is snake case
+/// 2) avoids C language keywords
+lg_str8
+mrv_sg_pascal_to_snake_escaped(LG_Arena *arena, lg_str8 original) {
+    lg_assert(original.len != 0);
+
+    LG_StatusKind status;
+
+    lg_str8 name_snake_case;
+    status = lg_str8_pascal_to_snake_case(original, arena, &name_snake_case);
+    lg_assert(status == LG_StatusKind_OK);
+
+    if (name_snake_case.len > 16) {
+        return name_snake_case;
+    }
+
+    uint64_t this_hash = lg_hash_16(name_snake_case.p, name_snake_case.len);
+    for (uint32_t i = 0; i < MRV_N_C_KEYWORDS; i++) {
+        uint64_t reserved_hash = MRV_C_KEYWORDS[i].hash;
+        if (
+            this_hash != reserved_hash ||
+            lg_strcmp(MRV_C_KEYWORDS[i].str, name_snake_case) != 0
+        ) {
+            continue;
+        }
+
+        // waste memory who cares
+        lg_str8 cat;
+        status = lg_strcat(arena, (lg_str8[]){name_snake_case, lg_str8_lit("_")}, 2, &cat);
+        lg_assert(status == LG_StatusKind_OK);
+
+        return cat;
+    }
+
+    return name_snake_case;
+}
+
 void
 mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
     lg_printf(ctx->header_file_writer, lg_str8_lit(
@@ -3155,10 +3241,7 @@ mrv_sg_node_union_type(MRV_SourcegenContext *ctx) {
             LG_Scope scope = lg_push_scope(ctx->scratch);
 
             MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
-
-            lg_str8 name_snake_case;
-            LG_StatusKind status = lg_str8_pascal_to_snake_case(entry.name, ctx->scratch, &name_snake_case);
-            lg_assert(status == LG_StatusKind_OK);
+            lg_str8 name_snake_case = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
 
             if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
                 lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Node_%{str} %{str};"), ctx->ldesc->language_name, entry.name, name_snake_case);
@@ -3277,7 +3360,7 @@ lg_hbuilder_${{op_snake}}(
     builder->next_symbol_id++;
     
     node->node.opcode = LG_${{lang_name}}Opcode_${{op}};
-    node->node.as.${{op_snake}} = (LG_${{lang_name}}Node_${{op}}){${{L:props}}};
+    node->node.as.${{op_var_ident}} = (LG_${{lang_name}}Node_${{op}}){${{L:props}}};
 
     if (builder->nodes_tail != NULL) {
         node->prev = builder->nodes_tail;
@@ -3297,7 +3380,7 @@ lg_hbuilder_${{op_snake}}(
 
         LG_Scope scope = lg_push_scope(ctx->scratch);
         LG_StatusKind status = LG_StatusKind_OK;
-
+        lg_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
         lg_str8 name_snake;
         status = lg_str8_pascal_to_snake_case(entry.name, ctx->scratch, &name_snake);
         lg_assert(status == LG_StatusKind_OK);
@@ -3381,6 +3464,7 @@ lg_hbuilder_${{op_snake}}(
             {lg_str8_lit("early_return_statement"),  { .strlist = early_return_statement }},
             {lg_str8_lit("op"),                      { .str = entry.name }},
             {lg_str8_lit("op_snake"),                { .str = name_snake }},
+            {lg_str8_lit("op_var_ident"),            { .str = var_ident }},
             {lg_str8_lit("operands"),                { .strlist = operands }},
             {lg_str8_lit("props"),                   { .strlist = props }},
         };
@@ -3389,7 +3473,7 @@ lg_hbuilder_${{op_snake}}(
 
         if (entry.as.operator.return_type.len > 0) {
             lg_printf(ctx->source_file_writer, lg_str8_lit(
-                "\n\n    return (LG_%{str}Symbol_%{str}){ .id = ctx->next_symbol_id };"
+                "\n\n    return (LG_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
             ), ctx->ldesc->language_name, entry.as.operator.return_type);
         }
 
