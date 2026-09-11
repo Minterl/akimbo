@@ -1855,7 +1855,8 @@ typedef uint8_t
 MRV_TypeKind;
 enum 
 MRV_TypeKind {
-    MRV_TypeKind_Native,
+    MRV_TypeKind_Nominal,
+    MRV_TypeKind_Lambda,
     MRV_TypeKind_Host,
 };
 
@@ -1876,6 +1877,11 @@ MRV_LanguageDescriptorEntry {
     union {
         struct {
             MRV_TypeKind type_kind;
+
+            /// the following are only active in the case that this is a lambda
+            MRV_LanguageDescriptorRef return_type;
+            MRV_LanguageDescriptorRef left_arg_type;
+            MRV_LanguageDescriptorRef right_arg_type;
         } type;
 
         struct {
@@ -2104,6 +2110,8 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         return;
     }
 
+    MRV_ASTNodeChildren as = self->children_as;
+
     mrv_match_ast_node(self->kind) {
     case MRV_ASTNodeKind_Program:
     case MRV_ASTNodeKind_OperatorDeclaration:
@@ -2136,7 +2144,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     // we'll also take this opportunity to record the language name
     case MRV_ASTNodeKind_LanguageDeclaration: {
-        lg_str8 language_name = mrv_span_to_str8(self->children_as.LanguageDeclaration.ident->span, ctx->text);
+        lg_str8 language_name = mrv_span_to_str8(as.LanguageDeclaration.ident->span, ctx->text);
         if (
             ctx->ldesc.language_name.len != 0 && 
             (lg_strcmp(language_name, ctx->ldesc.language_name) != 0)
@@ -2148,7 +2156,14 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     }
 
     case MRV_ASTNodeKind_TypeDeclaration: {
-        lg_str8 ident = mrv_span_to_str8(self->children_as.TypeDeclaration.ident->span, ctx->text);
+        lg_str8 ident = mrv_span_to_str8(as.TypeDeclaration.ident->span, ctx->text);
+
+        MRV_TypeKind type_kind;
+        if (mrv_ast_is_nil_node(ctx->ast, as.TypeDeclaration.non_trivial_alias)) {
+            type_kind = MRV_TypeKind_Nominal;
+        } else {
+            type_kind = MRV_TypeKind_Lambda;
+        }
 
         size_t idx;
         bool found;
@@ -2169,9 +2184,73 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         }
         lg_assert(status == LG_StatusKind_OK);
 
+        if (type_kind == MRV_TypeKind_Lambda) {
+            MRV_ASTNode *outer_ident = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.outermost_ident;
+            MRV_ASTNode *arg_list = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.invocation_arg_list;
+
+            size_t n_args = arg_list->children_as.InvocationArgList.n_args;
+            lg_str8 outer_ident_str = mrv_span_to_str8(outer_ident->span, ctx->text);
+
+            if (lg_strcmp(outer_ident_str, lg_str8_lit("Lambda")) != 0) {
+                mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                    "non-trivial type %{str} aliases a %{str} \n"
+                    "non-trivial types must all be aliases to lambdas (for now)"
+                ), ident, outer_ident_str);
+                return;
+            }
+
+            if (n_args > 3) {
+                mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                    "type %{str}, a lambda, has more than three parameters\n"
+                    "lambdas may only have three: (return type, left arg, right arg)"
+                ), ident);
+                return;
+            }
+
+            for (size_t i = 0; i < n_args; i++) {
+                MRV_ASTNode *arg_node = arg_list->children_as.InvocationArgList.args[i];
+                lg_str8 arg_str = mrv_span_to_str8(arg_node->span, ctx->text);
+
+                MRV_LanguageDescriptorRef ldesc_ref;
+                if (arg_node->kind == MRV_ASTNodeKind_Unit) {
+                    ldesc_ref = (MRV_LanguageDescriptorRef){ .idx = 0 };
+                } else if (arg_node->kind == MRV_ASTNodeKind_HostTypeIdent) {
+                    mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                        "%{str} is a host type, a parameter of the type %{str}, which is a lambda\n"
+                        "lambdas cannot take or return host types"
+                    ), arg_str, ident);
+                    return;
+                } else {
+                    lg_assert(arg_node->kind == MRV_ASTNodeKind_OtherIdent);
+
+                    bool found;
+                    size_t arg_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_str, &found);
+                    if (!found) {
+                        mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                            "unknown type %{str} as parameter to type %{str}"
+                            "lambdas cannot take or return host types"
+                        ), arg_str, ident);
+                        return;
+                    }
+
+                    ldesc_ref = (MRV_LanguageDescriptorRef){ .idx = arg_ldesc_idx };
+                }
+
+                if (i == 0) {
+                    ctx->ldesc.entries[idx].as.type.return_type = ldesc_ref;
+                } else if (i == 1) {
+                    ctx->ldesc.entries[idx].as.type.left_arg_type = ldesc_ref;
+                } else if (i == 2) {
+                    ctx->ldesc.entries[idx].as.type.right_arg_type = ldesc_ref;
+                } else {
+                    lg_unreachable();
+                }
+            }
+        }
+
         ctx->ldesc.entries[idx].name = ident;
         ctx->ldesc.entries[idx].kind = MRV_LanguageDescriptorEntryKind_Type;
-        ctx->ldesc.entries[idx].as.type.type_kind = MRV_TypeKind_Native;
+        ctx->ldesc.entries[idx].as.type.type_kind = type_kind;
 
         break;
     }
@@ -2181,7 +2260,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 }
 
 void
-mrv_sema_record_op_and_cf_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
+mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     if (mrv_ast_is_nil_node(ctx->ast, self)) {
         return;
     }
@@ -2190,7 +2269,7 @@ mrv_sema_record_op_and_cf_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     mrv_match_ast_node(self->kind) {
     case MRV_ASTNodeKind_Program:
-        mrv_sema_traverse_children(ctx, self, mrv_sema_record_op_and_cf_decls_r);
+        mrv_sema_traverse_children(ctx, self, mrv_sema_record_op_decls_r);
         break;
 
     case MRV_ASTNodeKind_OperatorDeclaration: {
@@ -2770,7 +2849,7 @@ mrv_analyze(
     /// ~~ do the type checking ~~
 
     mrv_sema_record_type_decls_r(&ctx, ctx.ast->root);
-    mrv_sema_record_op_and_cf_decls_r(&ctx, ctx.ast->root);
+    mrv_sema_record_op_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_combinators(&ctx, ctx.ast->root);
 
     
@@ -2905,7 +2984,10 @@ mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, lg_str8 name) {
     lg_assert(entry.kind == MRV_LanguageDescriptorEntryKind_Type);
 
     lg_str8 cat = {0};
-    if (entry.as.type.type_kind == MRV_TypeKind_Native) {
+    if (
+        entry.as.type.type_kind == MRV_TypeKind_Nominal || 
+        entry.as.type.type_kind == MRV_TypeKind_Lambda
+    ) {
         status = lg_strcat(ctx->scratch, (lg_str8[]){
             lg_str8_lit("LG_"),
             ctx->ldesc->language_name,
@@ -2941,7 +3023,7 @@ mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (
             entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
-            entry.as.type.type_kind != MRV_TypeKind_Native
+            entry.as.type.type_kind == MRV_TypeKind_Host
         ) {
             continue;
         }
@@ -2991,14 +3073,23 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (
             entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
-            entry.as.type.type_kind != MRV_TypeKind_Native
+            entry.as.type.type_kind == MRV_TypeKind_Host
         ) {
             continue;
         }
 
         lg_write(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\n"));
         lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.name));
-        lg_write(ctx->header_file_writer, lg_str8_lit(" {\n    uint32_t id;\n} "));
+        lg_write(ctx->header_file_writer, lg_str8_lit(" {\n    uint32_t id;"));
+
+        if (entry.as.type.type_kind == MRV_TypeKind_Lambda) {
+            lg_write(ctx->header_file_writer, lg_str8_lit(
+                "\n    uint32_t args_len;"
+                "\n    uint32_t body_len;"
+            ));
+        }
+
+        lg_write(ctx->header_file_writer, lg_str8_lit("\n} "));
         lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.name));
         lg_write(ctx->header_file_writer, lg_str8_lit(";\n"));
     }
