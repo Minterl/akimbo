@@ -2740,13 +2740,14 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             .as.lambda.args_len = n_args,
             .as.lambda.body_len = state->counting_n_insts,
         });
+
         for (size_t i = 0; i < n_args; i++) {
             MRV_Span arg_ident_span = arg_nodes[i]->children_as.DeclarationArg.ident->span;
             lg_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
 
             MRV_Span arg_type_span = arg_nodes[i]->children_as.DeclarationArg.type->span;
             lg_str8 arg_type = mrv_span_to_str8(arg_type_span, ctx->text);
-            
+
             bool found;
 
             mrv_nrstack_find_name(&state->nrstack, arg_ident, &found);
@@ -2780,13 +2781,20 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
             MRV_Symbol sym = mrv_nrstack_push(&state->nrstack, arg_ident);
 
+            mrv_istream_append(state->istream, (MRV_Inst){
+                .kind = MRV_InstKind_Arg,
+                .as.arg = {
+                    .sym = { .id = sym.id },
+                },
+            });
+
             state->istream->symtab[sym.id] = (MRV_SymbolTable){
                 .ident_span = arg_ident_span,
                 .type = type_ref,
                 .scope_depth = mrv_nrstack_get_scope_depth(&state->nrstack),
             };
             state->istream->symtab[sym.id].ident_span = arg_ident_span;
-            state->istream->symtab[sym.id].type = (MRV_LanguageDescriptorRef){ .idx = ldesc_idx };
+            state->istream->symtab[sym.id].type = type_ref;
         }
     }
 

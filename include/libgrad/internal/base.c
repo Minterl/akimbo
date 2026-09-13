@@ -628,7 +628,6 @@ lg_slab_find_first(LG_Slab *slab) {
     return first;
 }
 
-
 void
 lg_arena_init(LG_Arena *arena, LG_Allocator *host) {
     lg_memzero(arena, sizeof(LG_Arena));
