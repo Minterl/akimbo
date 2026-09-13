@@ -2894,7 +2894,7 @@ mrv_write_tmpl(
     MRV_TmplFieldTable *fields,
     size_t n_entries
 ) {
-    for (size_t i = 0 ; i < text.len; i++) {
+    for (size_t i = 0; i < text.len; i++) {
         if (
             text.p[i] == '$' &&
             (i + 1 < text.len && text.p[i + 1] == '{') &&
@@ -3260,15 +3260,29 @@ mrv_sg_node_union_type(MRV_SourcegenContext *ctx) {
 
 void
 mrv_sg_builder_types(MRV_SourcegenContext *ctx) {
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\nLG_%{str}NodeList {"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    struct LG_%{str}NodeList *prev;"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Node node;"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}NodeList;\n"), ctx->ldesc->language_name);
+    const lg_str8 list_template = lg_str8_lit(R"(
+typedef struct
+LG_${{lang_name}}Clist {
+    struct LG_${{lang_name}}Clist *prev;
+    uint32_t cap;
+    uint32_t len;
+    LG_${{lang_name}}Node nodes[] lg_check_bounds(cap);
+} LG_${{lang_name}}Clist;
+)");
 
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\nLG_%{str}Builder {"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}NodeList *nodes_tail;"), ctx->ldesc->language_name);
-    lg_write(ctx->header_file_writer, lg_str8_lit("\n    uint32_t next_symbol_id;"));
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}Builder;\n"), ctx->ldesc->language_name);
+    const lg_str8 builder_template = lg_str8_lit(R"(
+typedef struct
+LG_${{lang_name}}Builder {
+    struct LG_${{lang_name}}Clist *nodes_tail;
+    uint32_t next_symbol_id;
+} LG_${{lang_name}}Builder;
+)");
+
+    MRV_TmplFieldTable fields[] = {
+        {lg_str8_lit("lang_name"),  { .str = ctx->ldesc->language_name }},
+    };
+    mrv_write_tmpl(ctx->header_file_writer, list_template, fields, sizeof(fields) / sizeof(fields[0]));
+    mrv_write_tmpl(ctx->header_file_writer, builder_template, fields, sizeof(fields) / sizeof(fields[0]));
 }
 
 void
@@ -3350,22 +3364,31 @@ lg_hbuilder_${{op_snake}}(
     LG_Context *ctx,
     LG_${{lang_name}}Builder *builder${{L:operands}}
 ) {
-    LG_${{lang_name}}NodeList *node = lg_arena_alloc_struct(&ctx->arena, LG_${{lang_name}}NodeList);
-    if (node == NULL) {
-        lg_report_error(ctx, LG_StatusKind_OutOfMemory, lg_str8_lit("ran out of memory appending to ${{lang_snake}} expr"));
-        ${{L:early_return_statement}}
-    }
+    LG_${{lang_name}}Node node = {
+        .opcode = LG_${{lang_name}}Opcode_${{op}},
+        .as.${{op_var_ident}} = (LG_${{lang_name}}Node_${{op}}){${{L:props}}},
+    };
 
-    // increment first so zero is not a valid symbol id
-    builder->next_symbol_id++;
-    
-    node->node.opcode = LG_${{lang_name}}Opcode_${{op}};
-    node->node.as.${{op_var_ident}} = (LG_${{lang_name}}Node_${{op}}){${{L:props}}};
+    if (builder->nodes_tail->len < builder->nodes_tail->cap) {
+        builder->nodes_tail->nodes[builder->nodes_tail->len] = node;
+        builder->nodes_tail->len++;
+    } else {
+        LG_${{lang_name}}Clist *clist = lg_arena_alloc_famstruct(&ctx->arena, LG_${{lang_name}}Clist, 8 * sizeof(LG_${{lang_name}}Node));
+        if (clist == NULL) {
+            lg_report_error(ctx, LG_StatusKind_OutOfMemory, lg_str8_lit("ran out of memory appending to ${{lang_snake}} expr"));
+            ${{L:early_return_statement}}
+        }
+        
+        clist->cap = 8;
+        clist->len = 1;
 
-    if (builder->nodes_tail != NULL) {
-        node->prev = builder->nodes_tail;
-    }
-    builder->nodes_tail = node;)");
+        if (builder->nodes_tail != NULL) {
+            clist->prev = builder->nodes_tail;
+        }
+        builder->nodes_tail = clist;
+        clist->nodes[0] = node;
+    })");
+
     
     LG_TableIter iter = {0};
     lg_table_iter_init(&iter, &ctx->ldesc->table);
@@ -3403,7 +3426,7 @@ lg_hbuilder_${{op_snake}}(
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
             lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n        ."));
+            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            ."));
             lg_strlist_append(&props, ctx->scratch, arg_name_snake);
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit(" = "));
             lg_strlist_append(&props, ctx->scratch, arg_name_snake);
@@ -3424,7 +3447,7 @@ lg_hbuilder_${{op_snake}}(
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
             lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n        ."));
+            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            ."));
             lg_strlist_append(&props, ctx->scratch, arg_name_snake);
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit(" = "));
             lg_strlist_append(&props, ctx->scratch, arg_name_snake);
@@ -3439,8 +3462,8 @@ lg_hbuilder_${{op_snake}}(
             lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_"));
             lg_strlist_append(&return_type, ctx->scratch, entry.as.operator.return_type);
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n        .return_val = "));
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("{ .id = builder->next_symbol_id },"));
+            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .return_val = "));
+            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
 
             lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("return lg_nil("));
             lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("LG_"));
@@ -3454,7 +3477,7 @@ lg_hbuilder_${{op_snake}}(
         }
 
         if (props.tail != NULL) {
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n    "));
+            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n        "));
         }
 
         MRV_TmplFieldTable fields[] = {
@@ -3473,7 +3496,8 @@ lg_hbuilder_${{op_snake}}(
 
         if (entry.as.operator.return_type.len > 0) {
             lg_printf(ctx->source_file_writer, lg_str8_lit(
-                "\n\n    return (LG_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
+                "\n\n    builder->next_symbol_id++;"
+                "\n    return (LG_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
             ), ctx->ldesc->language_name, entry.as.operator.return_type);
         }
 
