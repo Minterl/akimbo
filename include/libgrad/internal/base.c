@@ -270,6 +270,72 @@ out:
     return LG_StatusKind_OK;
 }
 
+typedef struct
+LG_SPrintfContext {
+    lg_str8 fmt;
+    uint32_t count_len;
+    uint32_t out_cur_offset;
+    uint8_t *out;
+} LG_SPrintfContext;
+
+size_t
+lg_sprintf_count(void *ctx_, lg_str8 txt) {
+    LG_SPrintfContext *ctx = ctx_;
+    ctx->count_len += txt.len;
+    return txt.len;
+}
+
+size_t
+lg_sprintf_write(void *ctx_, lg_str8 txt) {
+    LG_SPrintfContext *ctx = ctx_;
+    lg_memcpy(ctx->out + ctx->out_cur_offset, txt.p, txt.len);
+    ctx->out_cur_offset += txt.len;
+    return txt.len;
+}
+
+LG_StatusKind
+lg_sprintf(LG_Arena *arena, lg_str8 *out_str, lg_str8 fmt, ...) {
+    lg_assert(out_str != NULL);
+
+    LG_SPrintfContext closure = {
+        .fmt = fmt,
+    };
+
+    LG_Writer counting_writer = (LG_Writer){
+        .ctx = &closure,
+        .write = lg_sprintf_count,
+    };
+
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        LG_StatusKind status = lg_vprintf(&counting_writer, fmt, ap);
+        va_end(ap);
+        lg_assert(status == LG_StatusKind_OK); // this writer cannot fail
+    }
+
+    const size_t len = closure.count_len;
+    uint8_t *p = lg_arena_alloc_array(arena, uint8_t, len);
+    if (p == NULL) {
+        return LG_StatusKind_OutOfMemory;
+    }
+
+    LG_Writer writing_writer = (LG_Writer){
+        .ctx = &closure,
+        .write = lg_sprintf_write,
+    };
+    
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        LG_StatusKind status = lg_vprintf(&writing_writer, fmt, ap);
+        va_end(ap);
+        lg_assert(status == LG_StatusKind_OK); // this writer also cannot fail
+    }
+
+    *out_str = (lg_str8){ .len = len, .p = p };
+}
+
 lg_force_inline bool
 lg_char_is_whitespace(uint8_t ch) {
     return (

@@ -374,6 +374,9 @@ lg_printf(LG_Writer *writer, const lg_str8 fmt, ...);
 LG_StatusKind 
 lg_vprintf(LG_Writer *writer, const lg_str8 fmt, va_list ap);
 
+LG_StatusKind
+lg_sprintf(LG_Arena *arena, lg_str8 *out_str, lg_str8 fmt, ...);
+
 size_t 
 lg_write_itoa(LG_Writer *writer, int64_t n);
 

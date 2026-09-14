@@ -3431,7 +3431,7 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
         LG_${{lang_name}}Clist *clist = lg_arena_alloc_famstruct(&ctx->arena, LG_${{lang_name}}Clist, 8 * sizeof(LG_${{lang_name}}Node));
         if (clist == NULL) {
             lg_report_error(ctx, LG_StatusKind_OutOfMemory, lg_str8_lit("ran out of memory appending to ${{lang_snake}} expr"));
-            ${{L:early_return_statement}}
+            ${{early_return_statement}}
         }
         
         clist->cap = 8;
@@ -3509,7 +3509,7 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit(","));
         }
 
-        LG_StringList early_return_statement = {0};
+        lg_str8 early_return_statement;
         LG_StringList return_type = {0};
         if (entry.as.operator.return_type.len > 0) {
             lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("LG_"));
@@ -3520,15 +3520,17 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .return_val = "));
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
 
-            lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("return lg_nil("));
-            lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("LG_"));
-            lg_strlist_append(&early_return_statement, ctx->scratch, ctx->ldesc->language_name);
-            lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("Symbol_"));
-            lg_strlist_append(&early_return_statement, ctx->scratch, entry.as.operator.return_type);
-            lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit(");"));
+            status = lg_sprintf(
+                ctx->scratch,
+                &early_return_statement,
+                lg_str8_lit("return lg_nil(LG_%{str}Symbol_%{str});"),
+                ctx->ldesc->language_name,
+                entry.as.operator.return_type
+            );
+            lg_assert(status == LG_StatusKind_OK);
         } else {
             lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("void"));
-            lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("return;"));
+            early_return_statement = lg_str8_lit("return;");
         }
 
         if (props.tail != NULL) {
@@ -3540,7 +3542,7 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
             {lg_str8_lit("lang_first_letter"),       { .str = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
             {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
             {lg_str8_lit("return_type"),             { .strlist = return_type }},
-            {lg_str8_lit("early_return_statement"),  { .strlist = early_return_statement }},
+            {lg_str8_lit("early_return_statement"),  { .str = early_return_statement }},
             {lg_str8_lit("op"),                      { .str = entry.name }},
             {lg_str8_lit("op_snake"),                { .str = name_snake }},
             {lg_str8_lit("op_var_ident"),            { .str = var_ident }},
@@ -3569,11 +3571,14 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
     lg_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
     lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_AnyArg"));
 
-    LG_StringList early_return_statement = {0};
-    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("return lg_nil("));
-    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("LG_"));
-    lg_strlist_append(&early_return_statement, ctx->scratch, ctx->ldesc->language_name);
-    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("Symbol_AnyArg);"));
+    lg_str8 early_return_statement = {0};
+    LG_StatusKind status = lg_sprintf(
+        ctx->scratch,
+        &early_return_statement,
+        lg_str8_lit("return lg_nil(LG_%{str}Symbol_AnyArg);"),
+        ctx->ldesc->language_name
+    );
+    lg_assert(status == LG_StatusKind_OK);
 
     LG_StringList operands = {0};
     lg_strlist_append(&operands, ctx->scratch, lg_str8_lit("\n    LG_"));
@@ -3588,7 +3593,7 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
         {lg_str8_lit("lang_first_letter"),       { .str = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
         {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
         {lg_str8_lit("return_type"),             { .strlist = return_type }},
-        {lg_str8_lit("early_return_statement"),  { .strlist = early_return_statement }},
+        {lg_str8_lit("early_return_statement"),  { .str = early_return_statement }},
         {lg_str8_lit("op"),                      { .str = lg_str8_lit("AnyArg") }},
         {lg_str8_lit("op_snake"),                { .str = lg_str8_lit("any_arg") }},
         {lg_str8_lit("op_var_ident"),            { .str = lg_str8_lit("any_arg") }},
