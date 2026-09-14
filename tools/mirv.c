@@ -3219,7 +3219,7 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
 
     lg_printf(
         ctx->header_file_writer,
-        lg_str8_lit("\n\ntypedef struct\nLG_%{str}Symbol_Any {"),
+        lg_str8_lit("\n\ntypedef union\nLG_%{str}Symbol_Any {"),
         ctx->ldesc->language_name
     );
     lg_strlist_write(&union_body, ctx->header_file_writer);
@@ -3561,6 +3561,49 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
 
         lg_pop_scope(ctx->scratch, scope);
     }
+
+    LG_Scope scope = lg_push_scope(ctx->scratch);
+
+    LG_StringList return_type = {0};
+    lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("LG_"));
+    lg_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
+    lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_AnyArg"));
+
+    LG_StringList early_return_statement = {0};
+    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("return lg_nil("));
+    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("LG_"));
+    lg_strlist_append(&early_return_statement, ctx->scratch, ctx->ldesc->language_name);
+    lg_strlist_append(&early_return_statement, ctx->scratch, lg_str8_lit("Symbol_AnyArg);"));
+
+    LG_StringList operands = {0};
+    lg_strlist_append(&operands, ctx->scratch, lg_str8_lit("\n    LG_"));
+    lg_strlist_append(&operands, ctx->scratch, ctx->ldesc->language_name);
+    lg_strlist_append(&operands, ctx->scratch, lg_str8_lit("Symbol_AnyArg sym"));
+
+    LG_StringList props = {0};
+    lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .sym = sym,\n        "));
+
+    MRV_TmplFieldTable fields[] = {
+        {lg_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
+        {lg_str8_lit("lang_first_letter"),       { .str = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
+        {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
+        {lg_str8_lit("return_type"),             { .strlist = return_type }},
+        {lg_str8_lit("early_return_statement"),  { .strlist = early_return_statement }},
+        {lg_str8_lit("op"),                      { .str = lg_str8_lit("AnyArg") }},
+        {lg_str8_lit("op_snake"),                { .str = lg_str8_lit("any_arg") }},
+        {lg_str8_lit("op_var_ident"),            { .str = lg_str8_lit("any_arg") }},
+        {lg_str8_lit("operands"),                { .strlist = operands }},
+        {lg_str8_lit("props"),                   { .strlist = props }},
+    };
+    mrv_write_tmpl(ctx->header_file_writer, header_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
+    mrv_write_tmpl(ctx->source_file_writer, source_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
+
+    lg_printf(ctx->source_file_writer, lg_str8_lit(
+        "\n\n    builder->next_symbol_id++;"
+        "\n    return (LG_%{str}Symbol_AnyArg){ .id = builder->next_symbol_id };\n}\n"
+    ), ctx->ldesc->language_name);
+
+    lg_pop_scope(ctx->scratch, scope);
 }
 
 void
@@ -3695,26 +3738,24 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("};"));
 
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("{"));
-                indent++;
-                uint32_t args_end = i + istream.insts[i].as.lambda.args_len;
-                for (; i < args_end; i++) {
+                uint32_t last_arg = i + istream.insts[i].as.lambda.args_len;
+                for (i++ /* skip the lambda inst itself */; i <= last_arg; i++) {
+                    lg_assert(istream.insts[i].kind == MRV_InstKind_Arg);
+
                     MRV_Symbol arg_sym = istream.insts[i].as.arg.sym;
                     lg_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
-                    lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
+                    // lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
                     lg_assert(ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].as.type.type_kind != MRV_TypeKind_Host);
-
+                    
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("."));
+                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
+                    lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
+                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_AnyArg "));
                     lg_strlist_append(&statements, ctx->scratch, arg_name);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" = "));
-                    lg_strlist_append(&statements, ctx->scratch, arg_type);
-                    if (i == args_end - 1) {
-                        indent--;
+                    if (i == last_arg - 1) {
                         mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                     }
                 }
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("};"));
             } else {
                 // lg_unreachable();
             }
