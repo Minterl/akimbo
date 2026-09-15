@@ -320,6 +320,8 @@ lg_sprintf(LG_Arena *arena, lg_str8 *out_str, lg_str8 fmt, ...) {
         return LG_StatusKind_OutOfMemory;
     }
 
+    closure.out = p;
+
     LG_Writer writing_writer = (LG_Writer){
         .ctx = &closure,
         .write = lg_sprintf_write,
@@ -334,6 +336,8 @@ lg_sprintf(LG_Arena *arena, lg_str8 *out_str, lg_str8 fmt, ...) {
     }
 
     *out_str = (lg_str8){ .len = len, .p = p };
+
+    return LG_StatusKind_OK;
 }
 
 lg_force_inline bool

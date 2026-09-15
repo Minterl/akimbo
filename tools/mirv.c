@@ -1698,6 +1698,61 @@ MRV_InstStream {
     MRV_SymbolTable *symtab lg_check_bounds(symtab_cap);
 } MRV_InstStream;
 
+typedef uint8_t
+MRV_TypeKind;
+enum 
+MRV_TypeKind {
+    MRV_TypeKind_Nominal,
+    MRV_TypeKind_Lambda,
+    MRV_TypeKind_Host,
+};
+
+typedef uint8_t
+MRV_LanguageDescriptorEntryKind;
+enum {
+    MRV_LanguageDescriptorEntryKind_Type,
+    MRV_LanguageDescriptorEntryKind_Operator,
+    MRV_LanguageDescriptorEntryKind_Combinator,
+};
+
+typedef struct
+MRV_LanguageDescriptorEntry {
+    MRV_LanguageDescriptorEntryKind kind;
+
+    lg_str8 name;
+
+    union {
+        struct {
+            MRV_TypeKind type_kind;
+
+            /// the following are only active in the case that this is a lambda
+            MRV_LanguageDescriptorRef return_type;
+            MRV_LanguageDescriptorRef left_arg_type;
+            MRV_LanguageDescriptorRef right_arg_type;
+        } type;
+
+        struct {
+            lg_str8  left_arg_name;
+            lg_str8  left_arg_type;
+            lg_str8  right_arg_type;
+            lg_str8  right_arg_name;
+            lg_str8  return_type;
+        } operator;
+
+        struct {
+            MRV_InstStream istream;
+        } combinator;
+    } as;
+} MRV_LanguageDescriptorEntry;
+
+typedef struct
+MRV_LanguageDescriptor {
+    LG_Arena                      arena;
+    lg_str8                       language_name;
+    LG_Table                      table;
+    MRV_LanguageDescriptorEntry  *entries;
+} MRV_LanguageDescriptor;
+
 typedef struct
 MRV_NameResolutionStackNode {
     lg_str8 str_ident;
@@ -1751,6 +1806,81 @@ mrv_istream_append(
     istream->len++;
 
     return idx;
+}
+
+void
+mrv_istream_dump(
+    MRV_InstStream *istream,
+    LG_Writer *writer,
+    MRV_LanguageDescriptor *ldesc,
+    lg_str8 text
+) {
+    for (uint32_t i = 0; i < istream->len; i++) {
+        mrv_match_inst(istream->insts[i].kind) {
+        case MRV_InstKind_NOP:
+            lg_printf(writer, lg_str8_lit("[%{i64}:NOP]\n"), i);
+            break;
+        case MRV_InstKind_Invocation: {
+            lg_printf(writer, lg_str8_lit("[%{i64}:Invocation] "), i);
+
+            uint32_t new_sym_id = istream->insts[i].as.invocation.new_symbol.id;
+            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            lg_str8 new_sym_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+            if (new_sym_id != 0) {
+                lg_printf(writer, lg_str8_lit("%{str}: %{str} = "), new_sym, new_sym_type);
+            }
+
+            lg_str8 op = ldesc->entries[istream->insts[i].as.invocation.operator.idx].name;
+            lg_printf(writer, lg_str8_lit("%{str} ("), op);
+
+            uint32_t left_arg_id = istream->insts[i].as.invocation.left_arg.id;
+            if (left_arg_id != 0) {
+                lg_str8 new_sym = mrv_span_to_str8(istream->symtab[left_arg_id].ident_span, text);
+                lg_write(writer, new_sym);
+            }
+
+            uint32_t right_arg_id = istream->insts[i].as.invocation.right_arg.id;
+            if (right_arg_id != 0) {
+                lg_str8 new_sym = mrv_span_to_str8(istream->symtab[right_arg_id].ident_span, text);
+                lg_printf(writer, lg_str8_lit(", %{str}"), new_sym);
+            }
+
+            lg_write(writer, lg_str8_lit(");\n"));
+
+            break;
+        }
+        case MRV_InstKind_Arg: {
+            uint32_t new_sym_id = istream->insts[i].as.arg.sym.id;
+            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            lg_str8 new_sym_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+
+            lg_printf(writer, lg_str8_lit("[%{i64}:Arg] %{str}: %{str};\n"), i, new_sym, new_sym_type);
+
+            break;
+        }
+        case MRV_InstKind_Lambda: {
+            uint32_t new_sym_id = istream->insts[i].as.lambda.new_symbol.id;
+            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            lg_str8 ret_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+
+            if (new_sym.len == 0) {
+                new_sym = lg_str8_lit("(anon)");
+            }
+
+            lg_printf(
+                writer,
+                lg_str8_lit("[%{i64}:Lambda] %{str}: (args_len = %{i64}, body_len = %{i64})"),
+                i, new_sym, istream->insts[i].as.lambda.args_len, istream->insts[i].as.lambda.body_len
+            );
+            if (ret_type.len > 0) {
+                lg_printf(writer, lg_str8_lit(" -> %{str}"), ret_type);
+            }
+            lg_write(writer, lg_str8_lit(";\n"));
+
+            break;
+        }
+        }
+    }
 }
 
 void
@@ -1852,61 +1982,6 @@ mrv_nrstack_pop_scope(MRV_NameResolutionStack *nrstack) {
 /// semantic analysis stuff
 ///
 ////////////////////////////////////////////////////////////////////////////////
-
-typedef uint8_t
-MRV_TypeKind;
-enum 
-MRV_TypeKind {
-    MRV_TypeKind_Nominal,
-    MRV_TypeKind_Lambda,
-    MRV_TypeKind_Host,
-};
-
-typedef uint8_t
-MRV_LanguageDescriptorEntryKind;
-enum {
-    MRV_LanguageDescriptorEntryKind_Type,
-    MRV_LanguageDescriptorEntryKind_Operator,
-    MRV_LanguageDescriptorEntryKind_Combinator,
-};
-
-typedef struct
-MRV_LanguageDescriptorEntry {
-    MRV_LanguageDescriptorEntryKind kind;
-
-    lg_str8 name;
-
-    union {
-        struct {
-            MRV_TypeKind type_kind;
-
-            /// the following are only active in the case that this is a lambda
-            MRV_LanguageDescriptorRef return_type;
-            MRV_LanguageDescriptorRef left_arg_type;
-            MRV_LanguageDescriptorRef right_arg_type;
-        } type;
-
-        struct {
-            lg_str8  left_arg_name;
-            lg_str8  left_arg_type;
-            lg_str8  right_arg_type;
-            lg_str8  right_arg_name;
-            lg_str8  return_type;
-        } operator;
-
-        struct {
-            MRV_InstStream istream;
-        } combinator;
-    } as;
-} MRV_LanguageDescriptorEntry;
-
-typedef struct
-MRV_LanguageDescriptor {
-    LG_Arena                      arena;
-    lg_str8                       language_name;
-    LG_Table                      table;
-    MRV_LanguageDescriptorEntry  *entries;
-} MRV_LanguageDescriptor;
 
 // miscellaneous state variables needed during some phases of recursive traversal,
 // namely when moving the bodies of combinators from the AST into structured
@@ -2612,6 +2687,10 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     mrv_match_ast_node(self->kind) {
     case MRV_ASTNodeKind_LambdaExpression: // handled above
+        break;
+
+    case MRV_ASTNodeKind_ExpressionStatement:
+        mrv_sema_append_inst_for_expr(ctx, as.ExpressionStatement.expression, lg_nil(MRV_Symbol));
         break;
 
     case MRV_ASTNodeKind_AssignmentStatement: {
@@ -3917,14 +3996,6 @@ main(int32_t argc, char **argv) {
         text
     );
 
-    for (int32_t i = 0; i < argc; i++) {
-        if (lg_strcmp(args[i], lg_str8_lit("--dump-ast")) == 0) {
-            mrv_ast_dump(&ast, &libc_writer, text);
-            ret_code = 0;
-            goto out_destroy_ast;
-        }
-    }
-
     MRV_LanguageDescriptor ldesc = {0};
     mrv_analyze(
         &libc_allocator,
@@ -3935,11 +4006,36 @@ main(int32_t argc, char **argv) {
         &ldesc
     );
 
+    for (int32_t i = 0; i < argc; i++) {
+        if (lg_strcmp(args[i], lg_str8_lit("--dump-ast")) == 0) {
+            mrv_ast_dump(&ast, &libc_writer, text);
+            ret_code = 0;
+            goto out_destroy_ldesc;
+        } else if (lg_strcmp(args[i], lg_str8_lit("--dump-istreams")) == 0) {
+            LG_TableIter iter = {0};
+            lg_table_iter_init(&iter, &ldesc.table);
+
+            size_t idx;
+            while (lg_table_iter_advance(&iter, &idx, NULL)) {
+                MRV_LanguageDescriptorEntry entry = ldesc.entries[idx];
+                if (entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
+                    continue;
+                }
+
+                lg_printf(&libc_writer, lg_str8_lit("\nInstruction Stream of Combinator %{str}:\n"), entry.name);
+
+                mrv_istream_dump(&entry.as.combinator.istream, &libc_writer, &ldesc, text);
+            }
+
+            ret_code = 0;
+            goto out_destroy_ldesc;
+        }
+    }
+
     mrv_gen_source(&libc_writer, &libc_writer, &scratch_allocator, &ldesc, text);
 
+out_destroy_ldesc:
     mrv_ldesc_destroy(&ldesc);
-
-out_destroy_ast:
     mrv_ast_destroy(&ast);
     mrv_tstream_destroy(&tstream, &libc_allocator);
     fclose(file);
