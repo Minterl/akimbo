@@ -2922,35 +2922,21 @@ mrv_analyze(
         .scratch = &arena,
         .err.writer = err_writer,
     };
-
-
-    //////////////////////////////////////////////
-    /// ~~ initialize tables ~~
     // TODO: remove magic number capacity
-
     LG_StatusKind status = LG_StatusKind_OK;
 
     lg_arena_init(&ctx.ldesc.arena, artifact_allocator);
     status = lg_table_init(&ctx.ldesc.table, &ctx.ldesc.arena, 1024);
     lg_assert(status == LG_StatusKind_OK);
+
     ctx.ldesc.entries = lg_arena_alloc_array(&ctx.ldesc.arena, MRV_LanguageDescriptorEntry, 1024);
     lg_assert(ctx.ldesc.entries != NULL);
-
-
-    //////////////////////////////////////////////
-    /// ~~ do the type checking ~~
 
     mrv_sema_record_type_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_op_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_combinators(&ctx, ctx.ast->root);
-
-    
-    //////////////////////////////////////////////
-    /// ~~ fin ~~
     
     *out_ldesc = ctx.ldesc;
-
-
     lg_arena_free_all(&arena);
 }
 
@@ -3201,8 +3187,8 @@ mrv_sg_pascal_to_snake_escaped(LG_Arena *arena, lg_str8 original) {
 void
 mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
     lg_printf(ctx->header_file_writer, lg_str8_lit(
-        "\ntypedef uint8_t\nLG_%{str}Type;\n"
-        "enum\nLG_%{str}Type {\n"
+        "\ntypedef uint8_t\nLG_%{str}Type;"
+        "\nenum\nLG_%{str}Type {"
     ), ctx->ldesc->language_name, ctx->ldesc->language_name);
 
     LG_TableIter iter = {0};
@@ -3220,20 +3206,25 @@ mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
 
         lg_printf(
             ctx->header_file_writer,
-            lg_str8_lit("    LG_%{str}Type_%{str},\n"),
+            lg_str8_lit("\n    LG_%{str}Type_%{str},"),
             ctx->ldesc->language_name, entry.name
         );
     }
 
-    lg_write(ctx->header_file_writer, lg_str8_lit("};\n"));
+    lg_write(ctx->header_file_writer, lg_str8_lit("\n};\n"));
 }
 
 void
 mrv_sg_opcode_enum(MRV_SourcegenContext *ctx) {
     lg_printf(ctx->header_file_writer, lg_str8_lit(
-        "\ntypedef uint8_t\nLG_%{str}Opcode;\n"
-        "enum\nLG_%{str}Opcode {\n"
-    ), ctx->ldesc->language_name, ctx->ldesc->language_name);
+        "\ntypedef uint8_t\nLG_%{str}Opcode;"
+        "\nenum\nLG_%{str}Opcode {"
+        "\n    LG_%{str}Opcode_NOP,"
+    ), 
+        ctx->ldesc->language_name,
+        ctx->ldesc->language_name,
+        ctx->ldesc->language_name
+    );
 
     LG_TableIter iter = {0};
     lg_table_iter_init(&iter, &ctx->ldesc->table);
@@ -3244,13 +3235,13 @@ mrv_sg_opcode_enum(MRV_SourcegenContext *ctx) {
         if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
             lg_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("    LG_%{str}Opcode_%{str},\n"),
+                lg_str8_lit("\n    LG_%{str}Opcode_%{str},"),
                 ctx->ldesc->language_name, entry.name
             );
         }
     }
 
-    lg_write(ctx->header_file_writer, lg_str8_lit("};\n"));
+    lg_write(ctx->header_file_writer, lg_str8_lit("\n};\n"));
 }
 
 void
@@ -3830,7 +3821,6 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                     lg_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
                     lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
                     lg_assert(ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].as.type.type_kind != MRV_TypeKind_Host);
-
 
                     lg_str8 arg_stmt;
                     lg_sprintf(
