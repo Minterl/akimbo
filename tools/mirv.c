@@ -3351,16 +3351,6 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
             );
         }
     }
-
-    const lg_str8 arg_template = lg_str8_lit(R"(
-typedef struct
-LG_${{lang_name}}Node_AnyArg {
-    LG_${{lang_name}}Type ty;
-    LG_${{lang_name}}Symbol_Any sym;
-} LG_${{lang_name}}Node_AnyArg;
-)");
-    MRV_TmplFieldTable fields[] = {{ lg_str8_lit("lang_name"), { .str = ctx->ldesc->language_name } }};
-    mrv_write_tmpl(ctx->header_file_writer, arg_template, fields, 1);
 }
 
 void
@@ -3695,14 +3685,14 @@ mrv_sg_combinator_functions(MRV_SourcegenContext *ctx) {
     const lg_str8 header_template = lg_str8_lit(R"(
 void
 lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
-    LG_${{lang_name}}builder *${{lang_first_letter}}builder,
+    LG_${{lang_name}}Builder *${{lang_first_letter}}builder,
     LG_${{lang_name}}Redex_${{comb_name}} *redex
 );
 )");
     const lg_str8 source_template = lg_str8_lit(R"(
 void
 lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
-    LG_${{lang_name}}builder *${{lang_first_letter}}builder,
+    LG_${{lang_name}}Builder *${{lang_first_letter}}builder,
     LG_${{lang_name}}Redex_${{comb_name}} *redex
 ) {${{L:statements}}
 }
@@ -3746,8 +3736,9 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 status = lg_str8_pascal_to_snake_case(op_entry.name, ctx->scratch, &op_snake);
                 lg_assert(status == LG_StatusKind_OK);
 
+                mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
+
                 if (op_entry.as.operator.return_type.len > 0) {
-                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
                     lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
@@ -3812,32 +3803,49 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("){"));
                 indent++;
                 {
-                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(".args_len = "));
+                    lg_str8 args_len;
+                    status = lg_sprintf(ctx->scratch, &args_len, lg_str8_lit(".args_len = %{i64},"), istream.insts[i].as.lambda.args_len);
+                    lg_assert(status == LG_StatusKind_OK);
+
+                    lg_str8 body_len;
+                    status = lg_sprintf(ctx->scratch, &body_len, lg_str8_lit(".body_len = %{i64},"), istream.insts[i].as.lambda.body_len);
+                    lg_assert(status == LG_StatusKind_OK);
 
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(".body_len = "));
+                    lg_strlist_append(&statements, ctx->scratch, args_len);
+
+                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
+                    lg_strlist_append(&statements, ctx->scratch, body_len);
                 }
                 indent--;
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("};"));
 
                 uint32_t last_arg = i + istream.insts[i].as.lambda.args_len;
-                for (i++ /* skip the lambda inst itself */; i <= last_arg; i++) {
+                i++; // skip the lambda node itself
+                while (i <= last_arg) {
                     lg_assert(istream.insts[i].kind == MRV_InstKind_Arg);
 
                     MRV_Symbol arg_sym = istream.insts[i].as.arg.sym;
                     lg_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
-                    // lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
+                    lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
                     lg_assert(ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].as.type.type_kind != MRV_TypeKind_Host);
+
+
+                    lg_str8 arg_stmt;
+                    lg_sprintf(
+                        ctx->scratch,
+                        &arg_stmt,
+                        lg_str8_lit("LG_%{str}Symbol_%{str} %{str} = lg_unreachable(\"TODO\");"),
+                        ctx->ldesc->language_name, arg_type, arg_name
+                    );
                     
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
-                    lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_AnyArg "));
-                    lg_strlist_append(&statements, ctx->scratch, arg_name);
+                    lg_strlist_append(&statements, ctx->scratch, arg_stmt);
                     if (i == last_arg - 1) {
                         mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
+                    } else {
+                        i++; // if we always incremented, we would skip the first node AFTER the lambda body
                     }
                 }
             } else {
