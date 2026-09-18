@@ -3814,7 +3814,7 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
 
                 uint32_t last_arg = i + istream.insts[i].as.lambda.args_len;
                 i++; // skip the lambda node itself
-                while (i <= last_arg) {
+                while (true) {
                     lg_assert(istream.insts[i].kind == MRV_InstKind_Arg);
 
                     MRV_Symbol arg_sym = istream.insts[i].as.arg.sym;
@@ -3830,12 +3830,14 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                         ctx->ldesc->language_name, arg_type, arg_name
                     );
                     
-                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, arg_stmt);
-                    if (i == last_arg - 1) {
+
+                    if (i >= last_arg) {
                         mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
+                        lg_strlist_append(&statements, ctx->scratch, arg_stmt);
+                        break;
                     } else {
-                        i++; // if we always incremented, we would skip the first node AFTER the lambda body
+                        lg_strlist_append(&statements, ctx->scratch, arg_stmt);
+                        i++; // if we always incremented, we would skip the first of the lambda body
                     }
                 }
             } else {
