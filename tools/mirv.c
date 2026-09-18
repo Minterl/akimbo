@@ -3829,7 +3829,6 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                         lg_str8_lit("LG_%{str}Symbol_%{str} %{str} = lg_unreachable(\"TODO\");"),
                         ctx->ldesc->language_name, arg_type, arg_name
                     );
-                    
 
                     if (i >= last_arg) {
                         mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
