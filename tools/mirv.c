@@ -3267,14 +3267,7 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
 
         lg_write(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\n"));
         lg_write(ctx->header_file_writer, symbol_type);
-        lg_write(ctx->header_file_writer, lg_str8_lit(" {\n    uint32_t id;"));
-
-        if (entry.as.type.type_kind == MRV_TypeKind_Lambda) {
-            lg_write(ctx->header_file_writer, lg_str8_lit(
-                "\n    uint32_t args_len;"
-                "\n    uint32_t body_len;"
-            ));
-        }
+        lg_write(ctx->header_file_writer, lg_str8_lit(" {\n    uint16_t id;"));
 
         lg_write(ctx->header_file_writer, lg_str8_lit("\n} "));
         lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.name));
@@ -3289,7 +3282,7 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
 
     lg_printf(
         ctx->header_file_writer,
-        lg_str8_lit("\n\ntypedef union\nLG_%{str}Symbol_Any {"),
+        lg_str8_lit("\ntypedef union\nLG_%{str}Symbol_Any {"),
         ctx->ldesc->language_name
     );
     lg_strlist_write(&union_body, ctx->header_file_writer);
@@ -3338,6 +3331,48 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
             lg_printf(
                 ctx->header_file_writer,
                 lg_str8_lit("\n} LG_%{str}Node_%{str};\n"),
+                ctx->ldesc->language_name, entry.name
+            );
+        } else if (
+            entry.kind == MRV_LanguageDescriptorEntryKind_Type &&
+            entry.as.type.type_kind == MRV_TypeKind_Lambda
+        ) {
+            lg_printf(
+                ctx->header_file_writer,
+                lg_str8_lit("\ntypedef struct\nLG_%{str}Node_%{str}Declaration {"),
+                ctx->ldesc->language_name, entry.name
+            );
+
+            lg_str8 left_arg_type = ctx->ldesc->entries[entry.as.type.left_arg_type.idx].name;
+            if (left_arg_type.len > 0) {
+                lg_printf(
+                    ctx->header_file_writer,
+                    lg_str8_lit("\n    %{str} left_arg;"),
+                    mrv_sg_fmt_symbol_type(ctx, left_arg_type)
+                );
+            }
+            lg_str8 right_arg_type = ctx->ldesc->entries[entry.as.type.right_arg_type.idx].name;
+            if (right_arg_type.len > 0) {
+                lg_printf(
+                    ctx->header_file_writer,
+                    lg_str8_lit("\n    %{str} right_arg;"),
+                    mrv_sg_fmt_symbol_type(ctx, right_arg_type)
+                );
+            }
+            lg_str8 return_type = ctx->ldesc->entries[entry.as.type.return_type.idx].name;
+            if (return_type.len > 0) {
+                lg_printf(
+                    ctx->header_file_writer,
+                    lg_str8_lit("\n    %{str} return_val;"),
+                    mrv_sg_fmt_symbol_type(ctx, return_type)
+                );
+            }
+
+            lg_printf(ctx->header_file_writer, lg_str8_lit("\n    uint32_t body_len;"));
+            
+            lg_printf(
+                ctx->header_file_writer,
+                lg_str8_lit("\n} LG_%{str}Node_%{str}Declaration;\n"),
                 ctx->ldesc->language_name, entry.name
             );
         }
