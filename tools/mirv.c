@@ -1646,10 +1646,15 @@ MRV_InstRef {
     uint32_t idx;
 } MRV_InstRef;
 
+/// intentionally opaque rather than just using a 0 sentinel b/c
+/// i would rather not rely on the hash function to *never* put something
+/// at index 0
 typedef struct
 MRV_LanguageDescriptorRef {
-    uint32_t idx;
+    uint32_t donttouchme;
 } MRV_LanguageDescriptorRef;
+
+lg_static_assert(sizeof(MRV_LanguageDescriptorRef) == 4);
 
 typedef struct
 MRV_Inst_Invocation {
@@ -1732,11 +1737,11 @@ MRV_LanguageDescriptorEntry {
         } type;
 
         struct {
-            lg_str8  left_arg_name;
-            lg_str8  left_arg_type;
-            lg_str8  right_arg_type;
-            lg_str8  right_arg_name;
-            lg_str8  return_type;
+            lg_str8                    left_arg_name;
+            lg_str8                    right_arg_name;
+            MRV_LanguageDescriptorRef  left_arg_type;
+            MRV_LanguageDescriptorRef  right_arg_type;
+            MRV_LanguageDescriptorRef  return_type;
         } operator;
 
         struct {
@@ -1769,6 +1774,36 @@ MRV_NameResolutionStack {
 } MRV_NameResolutionStack;
 
 #define mrv_match_inst(kind) switch ((enum MRV_InstKind)kind)
+
+lg_force_inline MRV_LanguageDescriptorRef
+mrv_ldesc_ref_from_idx(uint32_t idx) {
+    return (MRV_LanguageDescriptorRef){
+        .donttouchme = (idx << 1) | 1,
+    };
+}
+
+lg_force_inline uint32_t
+mrv_ldesc_ref_get_idx(MRV_LanguageDescriptorRef ref) {
+    return (ref.donttouchme & ~(0x1)) >> 1;
+}
+
+lg_force_inline bool
+mrv_ldesc_ref_is_valid(MRV_LanguageDescriptorRef ref) {
+    return ref.donttouchme & 1;
+}
+
+lg_str8
+mrv_ldesc_get_name(
+    MRV_LanguageDescriptor *ldesc,
+    MRV_LanguageDescriptorRef ref
+) {
+    if (lg_likely(mrv_ldesc_ref_is_valid(ref))) {
+        lg_str8 name = ldesc->entries[mrv_ldesc_ref_get_idx(ref)].name;
+        lg_assert(name.len > 0 && name.p != NULL);
+        return name;
+    }
+    return lg_nil(lg_str8);
+}
 
 void
 mrv_istream_init(
@@ -1825,12 +1860,12 @@ mrv_istream_dump(
 
             uint32_t new_sym_id = istream->insts[i].as.invocation.new_symbol.id;
             lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 new_sym_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+            lg_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
             if (new_sym_id != 0) {
                 lg_printf(writer, lg_str8_lit("%{str}: %{str} = "), new_sym, new_sym_type);
             }
 
-            lg_str8 op = ldesc->entries[istream->insts[i].as.invocation.operator.idx].name;
+            lg_str8 op = mrv_ldesc_get_name(ldesc, istream->insts[i].as.invocation.operator);
             lg_printf(writer, lg_str8_lit("%{str} ("), op);
 
             uint32_t left_arg_id = istream->insts[i].as.invocation.left_arg.id;
@@ -1852,7 +1887,7 @@ mrv_istream_dump(
         case MRV_InstKind_Arg: {
             uint32_t new_sym_id = istream->insts[i].as.arg.sym.id;
             lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 new_sym_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+            lg_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
 
             lg_printf(writer, lg_str8_lit("[%{i64}:Arg] %{str}: %{str};\n"), i, new_sym, new_sym_type);
 
@@ -1861,7 +1896,7 @@ mrv_istream_dump(
         case MRV_InstKind_Lambda: {
             uint32_t new_sym_id = istream->insts[i].as.lambda.new_symbol.id;
             lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 ret_type = ldesc->entries[istream->symtab[new_sym_id].type.idx].name;
+            lg_str8 ret_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
 
             if (new_sym.len == 0) {
                 new_sym = lg_str8_lit("(anon)");
@@ -1872,7 +1907,7 @@ mrv_istream_dump(
                 lg_str8_lit("[%{i64}:Lambda] %{str}: (args_len = %{i64}, body_len = %{i64})"),
                 i, new_sym, istream->insts[i].as.lambda.args_len, istream->insts[i].as.lambda.body_len
             );
-            if (ret_type.len > 0) {
+            if (mrv_ldesc_ref_is_valid(istream->symtab[new_sym_id].type)) {
                 lg_printf(writer, lg_str8_lit(" -> %{str}"), ret_type);
             }
             lg_write(writer, lg_str8_lit(";\n"));
@@ -2270,7 +2305,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
             if (lg_strcmp(outer_ident_str, lg_str8_lit("Lambda")) != 0) {
                 mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
-                    "non-trivial type %{str} aliases a %{str} \n"
+                    "non-trivial type %{str} aliases a(n) %{str}\n"
                     "non-trivial types must all be aliases to lambdas (for now)"
                 ), ident, outer_ident_str);
                 return;
@@ -2290,7 +2325,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
                 MRV_LanguageDescriptorRef ldesc_ref;
                 if (arg_node->kind == MRV_ASTNodeKind_Unit) {
-                    ldesc_ref = (MRV_LanguageDescriptorRef){ .idx = 0 };
+                    ldesc_ref = (MRV_LanguageDescriptorRef){0};
                 } else if (arg_node->kind == MRV_ASTNodeKind_HostTypeIdent) {
                     mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
                         "%{str} is a host type, a parameter of the type %{str}, which is a lambda\n"
@@ -2304,13 +2339,13 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     size_t arg_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_str, &found);
                     if (!found) {
                         mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
-                            "unknown type %{str} as parameter to type %{str}"
+                            "unknown type %{str} as parameter to type %{str}\n"
                             "lambdas cannot take or return host types"
                         ), arg_str, ident);
                         return;
                     }
 
-                    ldesc_ref = (MRV_LanguageDescriptorRef){ .idx = arg_ldesc_idx };
+                    ldesc_ref = mrv_ldesc_ref_from_idx(arg_ldesc_idx);
                 }
 
                 if (i == 0) {
@@ -2362,7 +2397,8 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             lg_nil(lg_str8);
 
         lg_str8 arg_names[2] = {0};
-        lg_str8 arg_types[2] = {0};
+        MRV_LanguageDescriptorRef ret_type = {0};
+        MRV_LanguageDescriptorRef arg_types[2] = {0};
         {
             size_t n_args = arg_list->children_as.DeclarationArgList.n_args;
             if (n_args > 2) {
@@ -2408,7 +2444,7 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 }
 
                 arg_names[i] = name_ident;
-                arg_types[i] = type_ident;
+                arg_types[i] = mrv_ldesc_ref_from_idx(idx);
             }
 
             if (has_return) {
@@ -2431,6 +2467,8 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     );
                     break;
                 }
+
+                ret_type = mrv_ldesc_ref_from_idx(idx);
             }
         }
 
@@ -2456,7 +2494,7 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         ctx->ldesc.entries[op_idx].as.operator.left_arg_type = arg_types[0];
         ctx->ldesc.entries[op_idx].as.operator.right_arg_name = arg_names[1];
         ctx->ldesc.entries[op_idx].as.operator.right_arg_type = arg_types[1];
-        ctx->ldesc.entries[op_idx].as.operator.return_type = return_type_ident;
+        ctx->ldesc.entries[op_idx].as.operator.return_type = ret_type;
 
         break;
     }
@@ -2593,7 +2631,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             .kind = MRV_InstKind_Invocation,
             .as.invocation = {
                 .new_symbol = new_symbol,
-                .operator = { .idx = operator_ldesc_idx },
+                .operator = mrv_ldesc_ref_from_idx(operator_ldesc_idx),
                 .left_arg = left_arg_symbol,
                 .right_arg = right_arg_symbol,
             },
@@ -2646,7 +2684,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
                     return;
                 }
 
-                type_ref = (MRV_LanguageDescriptorRef){ .idx = type_ldesc_idx };
+                type_ref = mrv_ldesc_ref_from_idx(type_ldesc_idx);
             }
 
             state->istream->symtab[symbol.id] = (MRV_SymbolTable){
@@ -2719,7 +2757,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 return;
             }
 
-            type_ref = (MRV_LanguageDescriptorRef){ .idx = type_ldesc_idx };
+            type_ref = mrv_ldesc_ref_from_idx(type_ldesc_idx);
         }
 
         MRV_Symbol new_symbol = {0};
@@ -2858,7 +2896,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     goto out;
                 }
 
-                type_ref = (MRV_LanguageDescriptorRef){ .idx = ldesc_idx };
+                type_ref = mrv_ldesc_ref_from_idx(ldesc_idx);
             }
 
             MRV_Symbol sym = mrv_nrstack_push(&state->nrstack, arg_ident);
@@ -3304,27 +3342,27 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
                 ctx->ldesc->language_name, entry.name
             );
 
-            if (entry.as.operator.left_arg_name.len != 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.operator.left_arg_type)) {
                 lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.as.operator.left_arg_type));
+                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
                 lg_printf(
                     ctx->header_file_writer,
                     lg_str8_lit(" %{str};"),
                     entry.as.operator.left_arg_name
                 );
             }
-            if (entry.as.operator.right_arg_name.len != 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.operator.right_arg_type)) {
                 lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.as.operator.right_arg_type));
+                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
                 lg_printf(
                     ctx->header_file_writer,
                     lg_str8_lit(" %{str};"),
                     entry.as.operator.right_arg_name
                 );
             }
-            if (entry.as.operator.return_type.len != 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
                 lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.as.operator.return_type));
+                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)));
                 lg_write(ctx->header_file_writer, lg_str8_lit(" return_val;"));
             }
             
@@ -3343,28 +3381,25 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
                 ctx->ldesc->language_name, entry.name
             );
 
-            lg_str8 left_arg_type = ctx->ldesc->entries[entry.as.type.left_arg_type.idx].name;
-            if (left_arg_type.len > 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.left_arg_type)) {
                 lg_printf(
                     ctx->header_file_writer,
                     lg_str8_lit("\n    %{str} left_arg;"),
-                    mrv_sg_fmt_symbol_type(ctx, left_arg_type)
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.left_arg_type))
                 );
             }
-            lg_str8 right_arg_type = ctx->ldesc->entries[entry.as.type.right_arg_type.idx].name;
-            if (right_arg_type.len > 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.right_arg_type)) {
                 lg_printf(
                     ctx->header_file_writer,
                     lg_str8_lit("\n    %{str} right_arg;"),
-                    mrv_sg_fmt_symbol_type(ctx, right_arg_type)
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.right_arg_type))
                 );
             }
-            lg_str8 return_type = ctx->ldesc->entries[entry.as.type.return_type.idx].name;
-            if (return_type.len > 0) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.return_type)) {
                 lg_printf(
                     ctx->header_file_writer,
                     lg_str8_lit("\n    %{str} return_val;"),
-                    mrv_sg_fmt_symbol_type(ctx, return_type)
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.return_type))
                 );
             }
 
@@ -3477,12 +3512,11 @@ LG_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
         ) {
             MRV_Inst_Arg arg = entry.as.combinator.istream.insts[i_current_inst].as.arg;
             MRV_SymbolTable symtab_entry = entry.as.combinator.istream.symtab[arg.sym.id];
-            MRV_LanguageDescriptorEntry type_entry = ctx->ldesc->entries[symtab_entry.type.idx];
-
+            lg_str8 type_name = mrv_ldesc_get_name(ctx->ldesc, symtab_entry.type);
             lg_str8 ident_str = mrv_span_to_str8(symtab_entry.ident_span, ctx->text);
 
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit("\n    "));
-            lg_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, type_entry.name));
+            lg_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, type_name));
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit(" "));
             lg_strlist_append(&members, ctx->scratch, ident_str);
             lg_strlist_append(&members, ctx->scratch, lg_str8_lit(";"));
@@ -3561,18 +3595,13 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
         LG_StringList operands = {0};
         LG_StringList props = {0};
 
-        if (entry.as.operator.left_arg_name.len > 0) {
+        if (mrv_ldesc_ref_is_valid(entry.as.operator.left_arg_type)) {
             lg_str8 arg_name_snake = {0};
             status = lg_str8_pascal_to_snake_case(entry.as.operator.left_arg_name, ctx->scratch, &arg_name_snake);
             lg_assert(status == LG_StatusKind_OK);
 
-            bool found;
-            size_t arg_idx = lg_table_get_str8(&ctx->ldesc->table, entry.as.operator.left_arg_type, &found);
-            lg_assert(found);
-            lg_assert(ctx->ldesc->entries[arg_idx].kind == MRV_LanguageDescriptorEntryKind_Type);
-
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(",\n    "));
-            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, entry.as.operator.left_arg_type));
+            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
             lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
@@ -3582,18 +3611,13 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
             lg_strlist_append(&props, ctx->scratch, arg_name_snake);
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit(","));
         }
-        if (entry.as.operator.right_arg_name.len > 0) {
+        if (mrv_ldesc_ref_is_valid(entry.as.operator.right_arg_type)) {
             lg_str8 arg_name_snake = {0};
             status = lg_str8_pascal_to_snake_case(entry.as.operator.right_arg_name, ctx->scratch, &arg_name_snake);
             lg_assert(status == LG_StatusKind_OK);
 
-            bool found;
-            size_t arg_idx = lg_table_get_str8(&ctx->ldesc->table, entry.as.operator.right_arg_type, &found);
-            lg_assert(found);
-            lg_assert(ctx->ldesc->entries[arg_idx].kind == MRV_LanguageDescriptorEntryKind_Type);
-
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(",\n    "));
-            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, entry.as.operator.right_arg_type));
+            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
             lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
             lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
@@ -3606,11 +3630,11 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
 
         lg_str8 early_return_statement;
         LG_StringList return_type = {0};
-        if (entry.as.operator.return_type.len > 0) {
+        if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
             lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("LG_"));
             lg_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
             lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_"));
-            lg_strlist_append(&return_type, ctx->scratch, entry.as.operator.return_type);
+            lg_strlist_append(&return_type, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
 
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .return_val = "));
             lg_strlist_append(&props, ctx->scratch, lg_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
@@ -3620,7 +3644,7 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
                 &early_return_statement,
                 lg_str8_lit("return lg_nil(LG_%{str}Symbol_%{str});"),
                 ctx->ldesc->language_name,
-                entry.as.operator.return_type
+                mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)
             );
             lg_assert(status == LG_StatusKind_OK);
         } else {
@@ -3647,11 +3671,11 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
         mrv_write_tmpl(ctx->header_file_writer, header_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
         mrv_write_tmpl(ctx->source_file_writer, source_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
 
-        if (entry.as.operator.return_type.len > 0) {
+        if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
             lg_printf(ctx->source_file_writer, lg_str8_lit(
                 "\n\n    builder->next_symbol_id++;"
                 "\n    return (LG_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
-            ), ctx->ldesc->language_name, entry.as.operator.return_type);
+            ), ctx->ldesc->language_name, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
         }
 
         lg_write(ctx->source_file_writer, lg_str8_lit("\n}\n"));
@@ -3754,7 +3778,7 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
         uint32_t indent = 1;
         for (uint32_t i = 0; i < istream.len; i++) {
             if (istream.insts[i].kind == MRV_InstKind_Invocation) {
-                MRV_LanguageDescriptorEntry op_entry = ctx->ldesc->entries[istream.insts[i].as.invocation.operator.idx];
+                MRV_LanguageDescriptorEntry op_entry = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.insts[i].as.invocation.operator)];
                 lg_assert(op_entry.kind = MRV_LanguageDescriptorEntryKind_Operator);
 
                 lg_str8 sym_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.new_symbol.id].ident_span, ctx->text);
@@ -3764,11 +3788,11 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
 
-                if (op_entry.as.operator.return_type.len > 0) {
+                if (mrv_ldesc_ref_is_valid(op_entry.as.operator.return_type)) {
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
                     lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                    lg_strlist_append(&statements, ctx->scratch, op_entry.as.operator.return_type);
+                    lg_strlist_append(&statements, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, op_entry.as.operator.return_type));
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" "));
                     lg_strlist_append(&statements, ctx->scratch, sym_name);
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" = "));
@@ -3780,8 +3804,8 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 lg_strlist_append(&statements, ctx->scratch, op_snake);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("("));
 
-                if (op_entry.as.operator.left_arg_type.len > 0) {
-                    MRV_TypeKind arg_type_kind = ctx->ldesc->entries[istream.symtab[istream.insts[i].as.invocation.left_arg.id].type.idx].as.type.type_kind;
+                if (mrv_ldesc_ref_is_valid(op_entry.as.operator.left_arg_type)) {
+                    MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.left_arg.id].type)].as.type.type_kind;
                     if (arg_type_kind == MRV_TypeKind_Host) {
                         lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("redex->"));
                     }
@@ -3789,10 +3813,10 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                     lg_str8 arg_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.left_arg.id].ident_span, ctx->text);
                     lg_strlist_append(&statements, ctx->scratch, arg_name);
                 }
-                if (op_entry.as.operator.right_arg_type.len > 0) {
+                if (mrv_ldesc_ref_is_valid(op_entry.as.operator.right_arg_type)) {
                     lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(", "));
 
-                    MRV_TypeKind arg_type_kind = ctx->ldesc->entries[istream.symtab[istream.insts[i].as.invocation.right_arg.id].type.idx].as.type.type_kind;
+                    MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.right_arg.id].type)].as.type.type_kind;
                     if (arg_type_kind == MRV_TypeKind_Host) {
                         lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("redex->"));
                     }
@@ -3807,10 +3831,7 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                     continue;
                 }
 
-                MRV_LanguageDescriptorEntry lambda_entry = ctx->ldesc->entries[istream.symtab[new_sym.id].type.idx];
-                lg_assert(lambda_entry.as.type.type_kind == MRV_TypeKind_Lambda);
-
-                lg_str8 ret_type = lambda_entry.name;
+                lg_str8 ret_type = mrv_ldesc_get_name(ctx->ldesc, istream.symtab[new_sym.id].type);
                 lg_str8 name = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
@@ -3854,9 +3875,7 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
 
                     MRV_Symbol arg_sym = istream.insts[i].as.arg.sym;
                     lg_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
-                    lg_str8 arg_type = ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].name;
-                    lg_assert(ctx->ldesc->entries[istream.symtab[arg_sym.id].type.idx].as.type.type_kind != MRV_TypeKind_Host);
-
+                    lg_str8 arg_type = mrv_ldesc_get_name(ctx->ldesc, istream.symtab[arg_sym.id].type);
                     lg_str8 arg_stmt;
                     lg_sprintf(
                         ctx->scratch,
