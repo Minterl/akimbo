@@ -1391,7 +1391,6 @@ mrv_parse(
     lg_assert(scratch_allocator.f != NULL);
     lg_assert(tstream != NULL);
     lg_assert(tstream->tail->next == NULL);
-
     
     /////////////////////////////////////
     /// ~~ initialize the parser ~~

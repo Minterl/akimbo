@@ -665,46 +665,54 @@ lg_alloc_contiguous_blocks(
 
 
 lg_force_inline void
-lg_slab_unlink(LG_Slab *slab, LG_Slab *lg_nullable next) {
+lg_slab_unlink(LG_Slab *slab) {
     lg_assert(slab != NULL);
-    lg_assert(slab != next);
+    lg_assert(slab != slab->up);
 
-    if (next != NULL) {
-        next->prev = slab->prev;
+    if (slab->up != NULL) {
+        lg_assert(slab->up->down == slab);
+        slab->up->down = slab->down;
     }            
-    slab->prev = NULL;
+    if (slab->down != NULL) {
+        lg_assert(slab->down->up == slab);
+        slab->down->up = slab->up;
+    }
+
+    slab->up = NULL;
+    slab->down = NULL;
 }
 
 lg_force_inline void
-lg_slab_push(LG_Slab *slab, LG_Slab **to) {
+lg_slab_push_and_retarget(LG_Slab *slab, LG_Slab **lg_nullable on_top_of_this) {
     lg_assert(slab != NULL);
-    lg_assert(to != NULL);
-    lg_assert(slab != *to);
+    lg_assert(on_top_of_this != NULL);
+    lg_assert(slab != *on_top_of_this);
 
-    if (*to == NULL) {
-        *to = slab;
-        return;
+    LG_Slab *bottom_of_chain = slab;
+    while (bottom_of_chain->down != NULL) {
+        lg_assert(on_top_of_this == NULL || bottom_of_chain != *on_top_of_this);
+        lg_assert(bottom_of_chain->down != bottom_of_chain);
+        bottom_of_chain = bottom_of_chain->down;
     }
 
-    LG_Slab *first_found = slab;
-    while (true) {
-        if (first_found->prev != NULL) {
-            first_found = first_found->prev;
-        } else {
-            break;
-        }
-    }
+    lg_assert(bottom_of_chain != NULL);
+    lg_assert(bottom_of_chain->down == NULL);
 
-    first_found->prev = *to;
-    *to = slab;
+    if (*on_top_of_this != NULL) {
+        lg_assert((*on_top_of_this)->up == NULL);
+        (*on_top_of_this)->up = bottom_of_chain;
+    }
+    bottom_of_chain->down = *on_top_of_this;
+
+    *on_top_of_this = slab;
 }
 
 lg_force_inline void
-lg_slab_free_from(LG_Slab *slab, LG_Allocator alloc) {
+lg_slab_free_downward_from(LG_Slab *slab, LG_Allocator alloc) {
     LG_Slab *next = slab;
     while (next != NULL) {
         LG_Slab *current = next;
-        next = current->prev;
+        next = current->down;
         lg_assert(current != next);
         lg_free(alloc, current);
     }
@@ -718,8 +726,8 @@ lg_arena_init(LG_Arena *arena, LG_Allocator host) {
 
 uint8_t*
 lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align) {
-    lg_assert(arena->current_slab == NULL || arena->current_slab != arena->recycled_slabs_head);
-    lg_assert(arena->current_slab == NULL || arena->current_slab->prev != arena->current_slab);
+    lg_assert(arena->top_slab == NULL || arena->top_slab != arena->top_recycled_slab);
+    lg_assert(arena->top_slab == NULL || arena->top_slab->down != arena->top_slab);
 
     const size_t size_bytes = lg_align_up(unaligned_size_bytes, align);
 
@@ -728,15 +736,15 @@ lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align) {
     // ~~ Plan A: use the current slab ~~
 
     if (lg_likely(
-        arena->current_slab != NULL &&
-        arena->current_offset + size_bytes <= arena->current_slab->cap
+        arena->top_slab != NULL &&
+        arena->current_offset + size_bytes <= arena->top_slab->cap
     )) {
-        lg_memzero(arena->current_slab->buf + arena->current_offset, size_bytes);
+        lg_memzero(arena->top_slab->buf + arena->current_offset, size_bytes);
 
         const size_t prev_offset = arena->current_offset;
         arena->current_offset += size_bytes;
 
-        return arena->current_slab->buf + prev_offset;
+        return arena->top_slab->buf + prev_offset;
     }
 
 
@@ -747,19 +755,22 @@ lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align) {
         goto plan_c;
     }
 
-    LG_Slab *before_to_reuse = NULL;
-    LG_Slab *to_reuse = arena->recycled_slabs_head;
+    LG_Slab *to_reuse = arena->top_recycled_slab;
     while (to_reuse != NULL) {
         if (to_reuse->cap >= size_bytes) {
-            lg_slab_unlink(to_reuse, before_to_reuse);
-            if (arena->recycled_slabs_head == to_reuse) {
-                arena->recycled_slabs_head = arena->recycled_slabs_head->prev;
+            if (arena->top_recycled_slab == to_reuse) {
+                arena->top_recycled_slab = arena->top_recycled_slab->down;
             }
+            lg_slab_unlink(to_reuse);
 
-            lg_assert(to_reuse->prev == NULL);
+            lg_assert(to_reuse->down == NULL);
+            lg_assert(to_reuse->up == NULL);
 
-            to_reuse->prev = arena->current_slab;
-            arena->current_slab = to_reuse;
+            if (arena->top_slab != NULL) {
+                arena->top_slab->up = to_reuse;
+            }
+            to_reuse->down = arena->top_slab;
+            arena->top_slab = to_reuse;
             arena->current_offset = size_bytes;
 
             lg_memzero(to_reuse->buf, size_bytes);
@@ -767,8 +778,7 @@ lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align) {
             return to_reuse->buf;
         }
 
-        before_to_reuse = to_reuse;
-        to_reuse = to_reuse->prev;
+        to_reuse = to_reuse->down;
     }
 
 
@@ -783,49 +793,48 @@ plan_c:;
         default_slab_size;
     const size_t total_size = sizeof(LG_Slab) + buf_size;
 
-    LG_Slab *next = (LG_Slab*)lg_alloc_nozero(arena->host, total_size);
-    if (next == NULL) {
+    LG_Slab *next_on_top = (LG_Slab*)lg_alloc_nozero(arena->host, total_size);
+    if (next_on_top == NULL) {
         return NULL;
     }
 
-    lg_memzero(next, sizeof(LG_Slab));
-    next->cap = buf_size;
+    lg_memzero(next_on_top, sizeof(LG_Slab));
+    next_on_top->cap = buf_size;
 
-    if (arena->current_slab != NULL) {
-        arena->current_slab->prev = next;
+    if (arena->top_slab != NULL) {
+        arena->top_slab->up = next_on_top;
     }
+    next_on_top->down = arena->top_slab;
 
-    arena->current_slab = next;
+    arena->top_slab = next_on_top;
     arena->current_offset = size_bytes;
 
-    lg_memzero(next->buf, size_bytes);
+    lg_memzero(next_on_top->buf, size_bytes);
 
-    return next->buf;
+    return next_on_top->buf;
 }
 
 LG_Scope
 lg_push_scope(LG_Arena *arena) {
     return (LG_Scope){
         .offset = arena->current_offset,
-        .slab = arena->current_slab,
+        .slab = arena->top_slab,
     };
 }
 
 void
 lg_pop_scope(LG_Arena *arena, LG_Scope scope) {
-    lg_assert((scope.offset != 0) ^ (scope.slab == NULL));
-
-    if (arena->current_slab == scope.slab && scope.offset > 0) {
+    if (lg_likely(arena->top_slab == scope.slab && scope.offset > 0)) {
         arena->current_offset = scope.offset;
         return;
     }
 
     LG_AllocatorFlags flags = lg_alloc_get_flags(arena->host);
     if (flags & LG_AllocatorFlag_NoRecycle) {
-        if (scope.slab == arena->current_slab) {
-            arena->current_slab = NULL;
+        if (scope.slab == arena->top_slab) {
+            arena->top_slab = NULL;
         }
-        lg_slab_free_from(scope.slab, arena->host);
+        lg_slab_free_downward_from(scope.slab, arena->host);
         return;
     }
 
@@ -836,17 +845,20 @@ lg_pop_scope(LG_Arena *arena, LG_Scope scope) {
     }
 
     LG_Slab *to_recycle = scope.offset == 0 ?
-        scope.slab :
-        scope.slab->next;
+        scope.slab->up : // we're recycling what's above scope.slab, since there is still 
+                         // valid data inside scope.slab
+        scope.slab; // we're recycling scope.slab itself
 
-    if (to_recycle == NULL) {
-        arena->current_offset = scope.offset;
-        return;
+    if (to_recycle != NULL) {
+        if (to_recycle->down != NULL) { 
+            lg_assert(to_recycle->down->up == to_recycle);
+            to_recycle->down->up = NULL;
+            to_recycle->down = NULL;
+        }
+        lg_slab_push_and_retarget(to_recycle, &arena->top_recycled_slab);
     }
 
-    arena->current_slab = to_recycle->prev;
-    lg_assert(to_recycle->prev != NULL);
-    lg_slab_push(to_recycle, &arena->recycled_slabs_head);
+    arena->top_slab = to_recycle->down;
     arena->current_offset = scope.offset;
 }
 
@@ -854,15 +866,15 @@ void
 lg_arena_free_recycled(LG_Arena *arena) {
     LG_AllocatorFlags flags = lg_alloc_get_flags(arena->host);
     if (flags & LG_AllocatorFlag_NoRecycle) {
-        lg_assert(arena->recycled_slabs_head == NULL);
+        lg_assert(arena->top_recycled_slab == NULL);
         return;
     }
-    if (arena->recycled_slabs_head == NULL) {
+    if (arena->top_recycled_slab == NULL) {
         return;
     }
 
-    lg_slab_free_from(arena->recycled_slabs_head, arena->host);
-    arena->recycled_slabs_head = NULL;
+    lg_slab_free_downward_from(arena->top_recycled_slab, arena->host);
+    arena->top_recycled_slab = NULL;
 }
 
 void
@@ -872,16 +884,16 @@ lg_arena_recycle_all(LG_Arena *arena) {
         return;
     }
 
-    lg_slab_push(arena->current_slab, &arena->recycled_slabs_head);
-    arena->current_slab = NULL;
+    lg_slab_push_and_retarget(arena->top_slab, &arena->top_recycled_slab);
+    arena->top_slab = NULL;
 }
 
 void
 lg_arena_free_all(LG_Arena *arena) {
-    lg_slab_free_from(arena->current_slab, arena->host);
+    lg_slab_free_downward_from(arena->top_slab, arena->host);
     lg_arena_free_recycled(arena);
     arena->current_offset = 0;
-    arena->current_slab = NULL;
+    arena->top_slab = NULL;
 }
 
 

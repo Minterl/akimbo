@@ -217,7 +217,16 @@ LG_Allocator {
 
 typedef struct
 LG_Slab {
-    struct LG_Slab       *prev;
+    // these are called up/down rather than next/prev so it's easier to visualize
+    // them as a physical stack.
+    // not like a "the stack grows down" kind of stack, but a real-world stack of
+    // something like paper
+    // next and prev don't mean all that much in this case regardless, since the
+    // "next" allocation can actually be "downwards" on this stack.
+
+    struct LG_Slab       *up;
+    struct LG_Slab       *down;
+
     size_t                cap;
     uint8_t _Alignas(16)  buf[] lg_check_bounds(cap);
 } LG_Slab;
@@ -225,11 +234,9 @@ LG_Slab {
 typedef struct 
 LG_Arena {
     LG_Allocator host;
-
     size_t current_offset;
-    struct LG_Slab *current_slab;
-
-    struct LG_Slab *recycled_slabs_head;
+    struct LG_Slab *top_slab;
+    struct LG_Slab *top_recycled_slab;
 } LG_Arena;
 
 typedef struct
