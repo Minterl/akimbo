@@ -683,31 +683,6 @@ lg_slab_unlink(LG_Slab *slab) {
 }
 
 lg_force_inline void
-lg_slab_push_and_retarget(LG_Slab *slab, LG_Slab **lg_nullable on_top_of_this) {
-    lg_assert(slab != NULL);
-    lg_assert(on_top_of_this != NULL);
-    lg_assert(slab != *on_top_of_this);
-
-    LG_Slab *bottom_of_chain = slab;
-    while (bottom_of_chain->down != NULL) {
-        lg_assert(on_top_of_this == NULL || bottom_of_chain != *on_top_of_this);
-        lg_assert(bottom_of_chain->down != bottom_of_chain);
-        bottom_of_chain = bottom_of_chain->down;
-    }
-
-    lg_assert(bottom_of_chain != NULL);
-    lg_assert(bottom_of_chain->down == NULL);
-
-    if (*on_top_of_this != NULL) {
-        lg_assert((*on_top_of_this)->up == NULL);
-        (*on_top_of_this)->up = bottom_of_chain;
-    }
-    bottom_of_chain->down = *on_top_of_this;
-
-    *on_top_of_this = slab;
-}
-
-lg_force_inline void
 lg_slab_free_downward_from(LG_Slab *slab, LG_Allocator alloc) {
     LG_Slab *next = slab;
     while (next != NULL) {
@@ -759,6 +734,7 @@ lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align) {
     while (to_reuse != NULL) {
         if (to_reuse->cap >= size_bytes) {
             if (arena->top_recycled_slab == to_reuse) {
+                lg_assert(arena->top_recycled_slab->up == NULL);
                 arena->top_recycled_slab = arena->top_recycled_slab->down;
             }
             lg_slab_unlink(to_reuse);
@@ -831,10 +807,7 @@ lg_pop_scope(LG_Arena *arena, LG_Scope scope) {
 
     LG_AllocatorFlags flags = lg_alloc_get_flags(arena->host);
     if (flags & LG_AllocatorFlag_NoRecycle) {
-        if (scope.slab == arena->top_slab) {
-            arena->top_slab = NULL;
-        }
-        lg_slab_free_downward_from(scope.slab, arena->host);
+        lg_unreachable("TODO");
         return;
     }
 
@@ -844,22 +817,53 @@ lg_pop_scope(LG_Arena *arena, LG_Scope scope) {
         return;
     }
 
-    LG_Slab *to_recycle = scope.offset == 0 ?
-        scope.slab->up : // we're recycling what's above scope.slab, since there is still 
-                         // valid data inside scope.slab
-        scope.slab; // we're recycling scope.slab itself
+    LG_Slab *to_recycle = scope.slab->up;
+    arena->current_offset = scope.offset;
 
     if (to_recycle != NULL) {
+        LG_Slab *prev_top_slab = arena->top_slab;
+        arena->top_slab = to_recycle->down;
+
+        // first, we break the chain below the final slab we want to recycle.
+        // this forms a chain like this:
+        //
+        //                  (nil)
+        //                    ^
+        //                    |
+        //             [prev_top_slab]
+        //                    ^
+        //                    |
+        //                    v
+        //                ..........
+        //                    ^
+        //                    |
+        //                    v
+        //               [to_recycle]
+        //                    |
+        //                    v
+        //                  (nil)
+        //
+        //            [the new top slab]
+        //
+        // then, we recycle from the top slab all the way down to that point.
+        // this one is confusing, so close your eyes and think about it.
+
+        // break the chain
         if (to_recycle->down != NULL) { 
             lg_assert(to_recycle->down->up == to_recycle);
             to_recycle->down->up = NULL;
             to_recycle->down = NULL;
         }
-        lg_slab_push_and_retarget(to_recycle, &arena->top_recycled_slab);
-    }
+        lg_assert(prev_top_slab->up == NULL);
 
-    arena->top_slab = to_recycle->down;
-    arena->current_offset = scope.offset;
+        // migrate the list
+        if (arena->top_recycled_slab != NULL) {
+            lg_assert((arena->top_recycled_slab)->up == NULL);
+            (arena->top_recycled_slab)->up = to_recycle;
+        }
+        to_recycle->down = arena->top_recycled_slab;
+        arena->top_recycled_slab = prev_top_slab;
+    }
 }
 
 void
@@ -880,11 +884,25 @@ lg_arena_free_recycled(LG_Arena *arena) {
 void
 lg_arena_recycle_all(LG_Arena *arena) {
     LG_AllocatorFlags flags = lg_alloc_get_flags(arena->host);
-    if (flags & LG_AllocatorFlag_NoRecycle) {
+    if (
+        flags & LG_AllocatorFlag_NoRecycle ||
+        arena->top_slab == NULL
+    ) {
         return;
     }
 
-    lg_slab_push_and_retarget(arena->top_slab, &arena->top_recycled_slab);
+    LG_Slab *bottom_active = arena->top_slab;
+    while (bottom_active->down != NULL) {
+        lg_assert(bottom_active->down != bottom_active);
+        bottom_active = bottom_active->down;
+    }
+
+    bottom_active->down = arena->top_recycled_slab;
+    if (arena->top_recycled_slab != NULL) {
+        lg_assert(arena->top_recycled_slab->up == NULL);
+        arena->top_recycled_slab->up = bottom_active;
+    }
+    arena->top_recycled_slab = arena->top_slab;
     arena->top_slab = NULL;
 }
 
