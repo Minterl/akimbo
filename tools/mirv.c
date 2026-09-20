@@ -646,7 +646,7 @@ MRV_ParserContext {
     size_t                 next_offset;
 
     MRV_Error              err;
-    LG_Arena               scratch;
+    LG_Arena              *scratch;
 
     LG_Arena               artifact;
     MRV_ASTNode           *nil_node;
@@ -787,7 +787,7 @@ mrv_parser_is_nil_node(MRV_ParserContext *ctx, MRV_ASTNode *node) {
 
 lg_force_inline void
 mrv_parser_nrs_push(MRV_ParserContext *ctx, MRV_ASTNode *to) {
-    MRV_ASTNodeRefStack* to_push = (MRV_ASTNodeRefStack*)lg_arena_alloc_struct(&ctx->scratch, MRV_ASTNodeRefStack);
+    MRV_ASTNodeRefStack* to_push = (MRV_ASTNodeRefStack*)lg_arena_alloc_struct(ctx->scratch, MRV_ASTNodeRefStack);
     lg_assert(to_push != NULL);
 
     to_push->to = to;
@@ -963,7 +963,7 @@ mrv_parse_decl_arg(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_decl_arg_list(MRV_ParserContext *ctx, bool is_binary) {
-    LG_Scope scope = lg_push_scope(&ctx->scratch);
+    LG_Scope scope = lg_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -1010,14 +1010,14 @@ loop_end:;
         .n_args = n_children
     );
 
-    lg_pop_scope(&ctx->scratch, scope);
+    lg_pop_scope(ctx->scratch, scope);
 
     return node;
 }
 
 MRV_ASTNode*
 mrv_parse_invocation_arg_list(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(&ctx->scratch);
+    LG_Scope scope = lg_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -1071,7 +1071,7 @@ loop_end:;
         .n_args = n_children
     );
 
-    lg_pop_scope(&ctx->scratch, scope);
+    lg_pop_scope(ctx->scratch, scope);
 
     return node;
 
@@ -1162,7 +1162,7 @@ mrv_parse_assignment_statement(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_block(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(&ctx->scratch);
+    LG_Scope scope = lg_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -1201,7 +1201,7 @@ loop_end:;
     MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
     MRV_ASTNode *node = mrv_parser_mknode(ctx, Block, all_span, .n_statements = n_children, .statements = children);
 
-    lg_pop_scope(&ctx->scratch, scope);
+    lg_pop_scope(ctx->scratch, scope);
     return node;
 }
 
@@ -1311,7 +1311,7 @@ mrv_parse_operator_decl(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_program(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(&ctx->scratch);
+    LG_Scope scope = lg_push_scope(ctx->scratch);
     MRV_ASTNode *root = mrv_parser_nil_node(ctx);
     size_t n_children = 0;
 
@@ -1375,20 +1375,19 @@ loop_end:;
     root->span = tok.span;
 
 out:
-    lg_pop_scope(&ctx->scratch, scope);
+    lg_pop_scope(ctx->scratch, scope);
     return root;
 }
 
 MRV_AST
 mrv_parse(
     LG_Allocator artifact_allocator,
-    LG_Allocator scratch_allocator, 
+    LG_Arena *scratch_allocator, 
     LG_Writer *err_writer,
     MRV_TokenStream *tstream,
     lg_str8 text
 ) {
     lg_assert(artifact_allocator.f != NULL);
-    lg_assert(scratch_allocator.f != NULL);
     lg_assert(tstream != NULL);
     lg_assert(tstream->tail->next == NULL);
     
@@ -1396,6 +1395,7 @@ mrv_parse(
     /// ~~ initialize the parser ~~
 
     MRV_ParserContext ctx = {
+        .scratch = scratch_allocator,
         .tstream = tstream,
         .err.writer = err_writer,
         .text = text,
@@ -1408,8 +1408,8 @@ mrv_parse(
         iter_block = iter_block->prev;
     }
 
+    LG_Scope scope = lg_push_scope(scratch_allocator);
     lg_arena_init(&ctx.artifact, artifact_allocator);
-    lg_arena_init(&ctx.scratch, scratch_allocator);
 
     ctx.nil_node = lg_arena_alloc_struct(&ctx.artifact, MRV_ASTNode);
     lg_assert(ctx.nil_node != NULL);
@@ -1425,7 +1425,7 @@ mrv_parse(
         .artifact = ctx.artifact,
     };
 
-    lg_arena_free_all(&ctx.scratch);
+    lg_pop_scope(scratch_allocator, scope);
 
     return ast;
 }
@@ -2942,7 +2942,7 @@ out:
 void
 mrv_analyze(
     LG_Allocator artifact_allocator,
-    LG_Allocator scratch_allocator,
+    LG_Arena *scratch_allocator,
     MRV_AST *ast,
     lg_str8 text,
     LG_Writer *err_writer,
@@ -2950,13 +2950,12 @@ mrv_analyze(
 ) {
     lg_assert(out_ldesc != NULL);
 
-    LG_Arena arena = {0};
-    lg_arena_init(&arena, scratch_allocator);
+    LG_Scope scope = lg_push_scope(scratch_allocator);
     
     MRV_SemaContext ctx = {
         .ast = ast,
         .text = text,
-        .scratch = &arena,
+        .scratch = scratch_allocator,
         .err.writer = err_writer,
     };
     // TODO: remove magic number capacity
@@ -2974,7 +2973,7 @@ mrv_analyze(
     mrv_sema_record_combinators(&ctx, ctx.ast->root);
     
     *out_ldesc = ctx.ldesc;
-    lg_arena_free_all(&arena);
+    lg_pop_scope(scratch_allocator, scope);
 }
 
 void
@@ -3988,7 +3987,7 @@ libc_allocator_f(void *ctx, LG_AllocatorModeKind mode_kind, LG_AllocatorModePara
             free(params.free.ptr);
             return (LG_AllocatorModeReturn){0};
         case LG_AllocatorModeKind_GetDefaultPreAllocation:
-            return (LG_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 0 };
+            return (LG_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
         case LG_AllocatorModeKind_GetFlags:
             return (LG_AllocatorModeReturn){ .get_flags.flags = 0};
         default:
@@ -4046,7 +4045,7 @@ main(int32_t argc, char **argv) {
 
     MRV_AST ast = mrv_parse(
         libc_allocator,
-        libc_allocator,
+        &scratch_allocator,
         &libc_writer,
         &tstream,
         text
@@ -4055,7 +4054,7 @@ main(int32_t argc, char **argv) {
     MRV_LanguageDescriptor ldesc = {0};
     mrv_analyze(
         libc_allocator,
-        libc_allocator,
+        &scratch_allocator,
         &ast,
         text,
         &libc_writer,
