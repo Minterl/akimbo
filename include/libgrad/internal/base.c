@@ -1034,7 +1034,7 @@ lg_table_probe(
     for (
         size_t i = starting_fingerprint_block_idx, n_visited = 0;
         n_visited < fingerprint_blocks_cap;
-        i = (i + 1) & (table->cap - 1), n_visited++
+        i = (i + 1) & (fingerprint_blocks_cap - 1), n_visited++
     ) {
         const uint64_t block = table->fingerprints_as[i].block;
 
