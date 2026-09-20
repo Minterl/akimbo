@@ -20,7 +20,7 @@ operator IntroduceAffineAddressOperator (host: << LG_AffineTransform >>) -> Affi
 operator IntroduceScalarExpression (host: << LG_ScalarExpression >>) -> ScalarExpression;
 
 operator ApplyAffineTransform (coord: Coordinate, atran: AffineTransform) -> Coordinate;
-operator ApplyAffineAddressOperator (addr_op: AffineAddressOperator, coord: Coordinate) -> Coordinate;
+operator ApplyAffineAddressOperator (addr_op: AffineAddressOperator, coord: Coordinate) -> Address;
 operator ApplyScalarExpression (scalar_expr: ScalarExpression, cons_pair: ScalarConsPair) -> Scalar;
 operator Access (addr: Address) -> Scalar;
 operator MakeScalarConsPair (x0: Scalar, x1: Scalar) -> ScalarConsPair;

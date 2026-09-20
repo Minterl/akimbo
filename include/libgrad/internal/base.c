@@ -1274,6 +1274,8 @@ lg_table_iter_advance(
     size_t *lg_nullable out_idx,
     uint64_t *lg_nullable out_cmp_key
 ) {
+    lg_assert(iter != NULL);
+    lg_assert(iter->table != NULL);
     lg_assert(lg_next_pow2(iter->table->cap) == iter->table->cap && iter->table->cap >= 8);
 
     const size_t fingerprint_blocks_cap = iter->table->cap >> 3;

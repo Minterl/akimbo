@@ -1791,6 +1791,13 @@ mrv_ldesc_ref_is_valid(MRV_LanguageDescriptorRef ref) {
     return ref.donttouchme & 1;
 }
 
+lg_force_inline bool
+mrv_ldesc_ref_eq(MRV_LanguageDescriptorRef lhs, MRV_LanguageDescriptorRef rhs) {
+    uint32_t left_idx = mrv_ldesc_ref_get_idx(lhs);
+    uint32_t right_idx = mrv_ldesc_ref_get_idx(rhs);
+    return left_idx == right_idx;
+}
+
 lg_str8
 mrv_ldesc_get_name(
     MRV_LanguageDescriptor *ldesc,
@@ -2940,6 +2947,230 @@ out:
 }
 
 void
+mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
+    LG_TableIter iter = {0};
+    lg_table_iter_init(&iter, &ctx->ldesc.table);
+
+    size_t idx;
+    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+        MRV_LanguageDescriptorEntry combinator_entry = ctx->ldesc.entries[idx];
+        if (combinator_entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
+            continue;
+        }
+
+        const MRV_InstStream *const istream = &combinator_entry.as.combinator.istream;
+        
+        for (uint32_t i = 0; i < istream->len; i++) {
+            mrv_match_inst(istream->insts[i].kind) {
+            case MRV_InstKind_Arg:
+            case MRV_InstKind_NOP:
+                break;
+
+            case MRV_InstKind_Invocation: {
+                const MRV_LanguageDescriptorEntry *const op_entry = &ctx->ldesc.entries[mrv_ldesc_ref_get_idx(istream->insts[i].as.invocation.operator)];
+                lg_assert(op_entry->kind == MRV_LanguageDescriptorEntryKind_Operator);
+
+                MRV_Symbol left_arg = istream->insts[i].as.invocation.left_arg;
+                MRV_LanguageDescriptorRef got_left_arg_type = istream->symtab[left_arg.id].type;
+                MRV_LanguageDescriptorRef want_left_arg_type = op_entry->as.operator.left_arg_type;
+                if (left_arg.id != 0) {
+                    if (!mrv_ldesc_ref_is_valid(want_left_arg_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        MRV_Span span = istream->symtab[left_arg.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "passed left argument %{str} to operator %{str} which does not take one"
+                            ), ident, op_name
+                        );
+                        goto again;
+                    }
+                    if (!mrv_ldesc_ref_eq(got_left_arg_type, want_left_arg_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_left_arg_type);
+                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_left_arg_type);
+                        MRV_Span span = istream->symtab[left_arg.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "left arg %{str} in invocation or operator %{str} is of type %{str}; "
+                                "wanted %{str}"
+                            ), ident, op_name, got_type, want_type
+                        );
+                        goto again;
+                    }
+                }
+
+                MRV_Symbol right_arg = istream->insts[i].as.invocation.right_arg;
+                MRV_LanguageDescriptorRef got_right_arg_type = istream->symtab[right_arg.id].type;
+                MRV_LanguageDescriptorRef want_right_arg_type = op_entry->as.operator.right_arg_type;
+                if (right_arg.id != 0) {
+                    if (!mrv_ldesc_ref_is_valid(want_right_arg_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        MRV_Span span = istream->symtab[right_arg.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "passed right argument %{str} to operator %{str} which does not take one"
+                            ), ident, op_name
+                        );
+                        goto again;
+                    }
+                    if (!mrv_ldesc_ref_eq(got_right_arg_type, want_right_arg_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_right_arg_type);
+                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_right_arg_type);
+                        MRV_Span span = istream->symtab[right_arg.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "right arg %{str} in invocation of operator %{str} is of type %{str}; "
+                                "wanted %{str}"
+                            ), ident, op_name, got_type, want_type
+                        );
+                        goto again;
+                    }
+                }
+
+                MRV_Symbol return_val = istream->insts[i].as.invocation.new_symbol;
+                MRV_LanguageDescriptorRef got_return_val_type = istream->symtab[return_val.id].type;
+                MRV_LanguageDescriptorRef want_return_val_type = op_entry->as.operator.return_type;
+                if (return_val.id != 0) {
+                    if (!mrv_ldesc_ref_is_valid(want_return_val_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        MRV_Span span = istream->symtab[return_val.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "assigned a value %{str} to to the result of the operator %{str}, which does not return a value"
+                            ), ident, op_name
+                        );
+                        goto again;
+                    }
+                    if (!mrv_ldesc_ref_eq(got_return_val_type, want_return_val_type)) {
+                        lg_str8 op_name = op_entry->name;
+                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_return_val_type);
+                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_return_val_type);
+                        MRV_Span span = istream->symtab[return_val.id].ident_span;
+                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        mrv_report_error(
+                            &ctx->err,
+                            span,
+                            lg_str8_lit(
+                                "assigned %{str} to return value of invocation of operator %{str}, which is of type %{str}; "
+                                "%{str} actually returns %{str}"
+                            ), ident, op_name, got_type, op_name, want_type
+                        );
+                        goto again;
+                    }
+                }
+
+                break;
+            }
+
+            case MRV_InstKind_Lambda: {
+                MRV_Symbol new_symbol = istream->insts[i].as.lambda.new_symbol;
+                MRV_LanguageDescriptorRef type = istream->symtab[new_symbol.id].type;
+                const MRV_LanguageDescriptorEntry *const type_entry = &ctx->ldesc.entries[mrv_ldesc_ref_get_idx(type)];
+
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.left_arg_type)) {
+                    MRV_Span span = istream->symtab[new_symbol.id].ident_span;
+                    lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+
+                    if (
+                        istream->len < i + 2 ||
+                        istream->insts[i + 1].kind != MRV_InstKind_Arg
+                    ) {
+                        mrv_report_error(
+                            &ctx->err, 
+                            span,
+                            lg_str8_lit("missing the left arg in declaration of lambda %{str} of type %{str}"),
+                            ident, type_entry->name
+                        );
+                        goto again;
+                    }
+
+                    MRV_Symbol arg_sym = istream->insts[i + 1].as.arg.sym;
+                    lg_assert(arg_sym.id != 0);
+
+                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.left_arg_type;
+                    MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
+
+                    if (!mrv_ldesc_ref_eq(want_arg_type, got_arg_type)) {
+                        mrv_report_error(
+                            &ctx->err, 
+                            span,
+                            lg_str8_lit(
+                                "declared lambda %{str} of type %{str} with left arg of type %{str}\n"
+                                "the left arg of %{str} is actually of type %{str}"
+                            ),
+                            ident, type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, got_arg_type),
+                            type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, want_arg_type)
+                        );
+                        goto again;
+                    }
+                }
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.right_arg_type)) {
+                    MRV_Span span = istream->symtab[new_symbol.id].ident_span;
+                    lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+
+                    if (
+                        istream->len < i + 3 ||
+                        istream->insts[i + 2].kind != MRV_InstKind_Arg
+                    ) {
+                        mrv_report_error(
+                            &ctx->err, 
+                            span,
+                            lg_str8_lit("missing the right arg in declaration of lambda %{str} of type %{str}"),
+                            ident, type_entry->name
+                        );
+                        goto again;
+                    }
+
+                    MRV_Symbol arg_sym = istream->insts[i + 2].as.arg.sym;
+                    lg_assert(arg_sym.id != 0);
+
+                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.right_arg_type;
+                    MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
+
+                    if (!mrv_ldesc_ref_eq(want_arg_type, got_arg_type)) {
+                        mrv_report_error(
+                            &ctx->err, 
+                            span,
+                            lg_str8_lit(
+                                "declared lambda %{str} of type %{str} with right arg of type %{str}\n"
+                                "the right arg of %{str} is actually of type %{str}"
+                            ),
+                            ident, type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, got_arg_type),
+                            type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, want_arg_type)
+                        );
+                        goto again;
+                    }
+                }
+
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.return_type)) {
+                    lg_unreachable("TODO: there may not even be a need for this yet");
+                }
+
+                break;
+            }
+            }
+again:;
+        }
+    }
+}
+
+void
 mrv_analyze(
     LG_Allocator artifact_allocator,
     LG_Arena *scratch_allocator,
@@ -2971,6 +3202,7 @@ mrv_analyze(
     mrv_sema_record_type_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_op_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_combinators(&ctx, ctx.ast->root);
+    mrv_sema_typecheck_istreams(&ctx);
     
     *out_ldesc = ctx.ldesc;
     lg_pop_scope(scratch_allocator, scope);
@@ -3092,7 +3324,7 @@ mrv_strlist_newline_indent(
     uint32_t level
 ) {
     for (uint32_t i = 0; i < level; i++) {
-        if (i == 0 ) {
+        if (i == 0) {
             lg_strlist_append(strlist, arena, lg_str8_lit("\n"));
         }
         lg_strlist_append(strlist, arena, lg_str8_lit("     "));

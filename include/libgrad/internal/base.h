@@ -375,7 +375,6 @@ LG_Writer {
     size_t (*write)(void *ctx, const lg_str8 str);
 } LG_Writer;
 
-
 lg_str8
 lg_str8_from_cstr(uint8_t *cstr);
 
@@ -383,7 +382,7 @@ lg_str8_from_cstr(uint8_t *cstr);
 int32_t 
 lg_strcmp(const lg_str8 a, const lg_str8 b);
 
-/// Copies from `src` to `dest` on a best-effor basis, meaning if `dest.len` < `src.len`, 
+/// Copies from `src` to `dest` on a best-effort basis, meaning if `dest.len` < `src.len`, 
 /// only `dest.len` bytes will ever be written, at a maximum.
 ///
 /// Returns the number of bytes written.
