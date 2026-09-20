@@ -109,7 +109,7 @@ lg_append_op_(
 LG_StatusKind
 lg_buftab_init(
     LG_BufferTable *buftab,
-    LG_Allocator *alloc,
+    LG_Allocator alloc,
     size_t cap
 ) {
     LG_StatusKind status = lg_map_init(&buftab->map, alloc, cap);
@@ -1006,7 +1006,7 @@ lg_compile_expr(
 // TODO: should this be `lg_expr_init`?
 LG_StatusKind 
 lg_alloc_expr(
-    LG_Allocator *alloc,
+    LG_Allocator alloc,
     LG_Expr *expr,
     size_t nodes_cap,
     size_t buftab_cap
@@ -1030,7 +1030,7 @@ lg_alloc_expr(
 }
 
 void 
-lg_free_expr(LG_Allocator *allocator, LG_Expr *expr) {
+lg_free_expr(LG_Allocator allocator, LG_Expr *expr) {
     allocator->free(allocator->ctx, expr->nodes);
     expr->nodes_cap = 0;
     expr->nodes_len = 0;

@@ -33,10 +33,10 @@ LG_LogicalSymbolTableIter {
 } LG_LogicalSymbolTableIter;
 
 LG_StatusKind 
-lg_symtab_init(LG_LogicalSymbolTable *table, LG_Allocator *alloc, size_t cap);
+lg_symtab_init(LG_LogicalSymbolTable *table, LG_Allocator alloc, size_t cap);
 
 void 
-lg_symtab_deinit(LG_LogicalSymbolTable *table, LG_Allocator *alloc);
+lg_symtab_deinit(LG_LogicalSymbolTable *table, LG_Allocator alloc);
 
 LG_StatusKind 
 lg_symtab_upsert(

@@ -18,7 +18,7 @@ LG_Context {
 void
 lg_context_init(
     LG_Context *ctx,
-    LG_Allocator *scratch_allocator,
+    LG_Allocator scratch_allocator,
     LG_Writer *lg_nullable error_writer
 );
 

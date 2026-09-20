@@ -218,7 +218,7 @@ lg_compile_expr(
 /// and assign offsets into the buffer for each field.
 LG_StatusKind
 lg_alloc_expr(
-    LG_Allocator *alloc,
+    LG_Allocator alloc,
     LG_Expr *expr,
     size_t nodes_cap,
     size_t bufmap_cap
@@ -226,6 +226,6 @@ lg_alloc_expr(
 
 /// Frees the memory required for an expr.
 void
-lg_free_expr(LG_Allocator *allocator, LG_Expr *expr);
+lg_free_expr(LG_Allocator allocator, LG_Expr *expr);
 
 #endif // LG_VM_H_

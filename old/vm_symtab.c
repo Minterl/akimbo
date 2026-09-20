@@ -33,7 +33,7 @@ lg_murmur_hash(uint32_t kh) {
 }
 
 LG_StatusKind 
-lg_symtab_init(LG_LogicalSymbolTable *table, LG_Allocator *alloc, size_t cap) {
+lg_symtab_init(LG_LogicalSymbolTable *table, LG_Allocator alloc, size_t cap) {
     const size_t align = 16;
 
     const size_t sz_occupied = cap * sizeof(bool);
@@ -81,7 +81,7 @@ lg_symtab_init(LG_LogicalSymbolTable *table, LG_Allocator *alloc, size_t cap) {
 }
 
 void 
-lg_symtab_deinit(LG_LogicalSymbolTable *table, LG_Allocator *alloc) {
+lg_symtab_deinit(LG_LogicalSymbolTable *table, LG_Allocator alloc) {
     alloc->free(alloc->ctx, table->occupied);
     alloc->free(alloc->ctx, table->descs);
     lg_memzero(table, sizeof(LG_LogicalSymbolTable));

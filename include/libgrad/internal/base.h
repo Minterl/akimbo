@@ -155,16 +155,56 @@ LG_STATUS_KIND_CSTRING_TABLE[] = {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
+typedef uint8_t
+LG_AllocatorModeKind;
+enum 
+LG_AllocatorModeKind {
+    LG_AllocatorModeKind_Alloc,
+    LG_AllocatorModeKind_Free,
+    LG_AllocatorModeKind_GetDefaultPreAllocation,
+    LG_AllocatorModeKind_GetFlags,
+};
+
 typedef uint32_t 
 LG_AllocatorFlags;
 enum {
-    LG_AllocatorFlag_NoRecycle = UINT32_C(0x1),
-    LG_AllocatorFlag_AssumeZeroed = UINT32_C(0x1 << 1),
+    LG_AllocatorFlag_NoRecycle    = UINT32_C(0x1),
+    LG_AllocatorFlag_AssumeZeroed = UINT32_C(0x1) << 1,
 };
 
-/// The only method that must be defined is `alloc`, the others may
-/// legally be NULL. Such is the case when using an arena-style allocator,
-/// where free is a no-op and the user deallocates memory outside of this interface.
+typedef union
+LG_AllocatorModeParams {
+    struct {
+        size_t size_bytes;
+    } alloc;    
+
+    struct {
+        uint8_t *ptr;
+    } free;
+
+    // void get_default_pre_allocation
+    // void get_flags
+} LG_AllocatorModeParams;
+
+typedef union
+LG_AllocatorModeReturn {
+    struct {
+        uint8_t *ptr;
+    } alloc;
+
+    // void free;
+
+    struct {
+        size_t size_bytes;
+    } get_default_pre_allocation;
+
+    struct {
+        LG_AllocatorFlags flags;
+    } get_flags;
+} LG_AllocatorModeReturn;
+
+/// To be passed by value, since it is not all that large, and doing so
+/// eliminates dependent instruction loads.
 ///
 /// Don't try to get clever and swap this out under the library's feet between calls.
 /// That will almost certainly end poorly.
@@ -172,30 +212,19 @@ typedef struct
 LG_Allocator {
     /// Context passed to each allocator method.
     void *ctx;
-
-    /// Allocate `size_bytes` bytes.
-    /// Callers will assume that this pointer is aligned.
-    void* (*alloc)(void *ctx, size_t size_bytes);
-    /// Free the memory at `ptr`.
-    /// TODO: find the direct calls to this and replace them with a macro or something.
-    void  (*lg_nullable free)(void *ctx, void *ptr);
-
-    size_t default_slab_size_bytes; 
-
-    LG_AllocatorFlags flags;
+    LG_AllocatorModeReturn (*f)(void *ctx, LG_AllocatorModeKind mode, LG_AllocatorModeParams params);
 } LG_Allocator;
 
 typedef struct
 LG_Slab {
     struct LG_Slab       *prev;
-    struct LG_Slab       *next;
     size_t                cap;
     uint8_t _Alignas(16)  buf[] lg_check_bounds(cap);
 } LG_Slab;
 
 typedef struct 
 LG_Arena {
-    LG_Allocator *host;
+    LG_Allocator host;
 
     size_t current_offset;
     struct LG_Slab *current_slab;
@@ -210,10 +239,10 @@ LG_Scope {
 } LG_Scope;
 
 uint8_t*
-lg_alloc_zero(LG_Allocator *alloc, size_t size_bytes);
+lg_alloc_zero(LG_Allocator alloc, size_t size_bytes);
 
 void 
-lg_free(LG_Allocator *alloc, void *ptr);
+lg_free(LG_Allocator alloc, void *ptr);
 
 /// Allocates `n` blocks of size `sizes[i]` and puts the resulting pointer
 /// in `out_ptrs[i]`.
@@ -224,7 +253,7 @@ lg_free(LG_Allocator *alloc, void *ptr);
 /// are allocated in the order of `out_ptrs`.
 LG_StatusKind 
 lg_alloc_contiguous_blocks(
-    LG_Allocator *alloc,
+    LG_Allocator alloc,
     uint8_t **out_ptrs,
     size_t *lg_nullable out_bytes_allocated,
     const size_t *sizes,
@@ -237,7 +266,7 @@ lg_alloc_contiguous_blocks(
 #define lg_arena_alloc_famstruct(arena, THeader, data_size) (THeader*)lg_arena_alloc((arena), sizeof(THeader) + (data_size), _Alignof(THeader))
 
 void
-lg_arena_init(LG_Arena *arena, LG_Allocator *host);
+lg_arena_init(LG_Arena *arena, LG_Allocator host);
 uint8_t*
 lg_arena_alloc(LG_Arena *arena, size_t unaligned_size_bytes, size_t align);
 LG_Scope

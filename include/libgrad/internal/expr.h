@@ -114,12 +114,12 @@ LG_StatusKind
 lg_lbuilder_finish(
     LG_Context *ctx,
     LG_LogicalBuilder *builder,
-    LG_Allocator *artifact_allocator,
+    LG_Allocator artifact_allocator,
     LG_LogicalExpr *out_lexpr
 );
 
 void
-lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator *artifact_allocator);
+lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator artifact_allocator);
 
 LG_LogicalSymbol
 lg_param(LG_Context *ctx, LG_LogicalBuilder *lexpr, LG_LogicalShape shape);

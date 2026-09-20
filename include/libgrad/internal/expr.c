@@ -120,7 +120,7 @@ LG_StatusKind
 lg_lbuilder_finish(
     LG_Context *ctx,
     LG_LogicalBuilder *builder,
-    LG_Allocator *artifact_allocator,
+    LG_Allocator artifact_allocator,
     LG_LogicalExpr *out_lexpr
 ) {
     LG_StatusKind status = lg_check_error(ctx);
@@ -218,7 +218,7 @@ lg_lbuilder_finish(
 }
 
 void
-lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator *artifact_allocator) {
+lg_lexpr_destroy(LG_LogicalExpr *lexpr, LG_Allocator artifact_allocator) {
     lg_free(artifact_allocator, lexpr->insts);
     lg_memzero(lexpr, sizeof(LG_LogicalExpr));
 }
@@ -468,7 +468,7 @@ lg_infer_y_shape(LG_Context *ctx, const LG_LogicalInst *node, LG_LogicalShape *i
 LG_StatusKind
 lg_lower_lexpr(
     LG_Context *ctx,
-    LG_Allocator *artifact_allocator,
+    LG_Allocator artifact_allocator,
     LG_LogicalExpr *lexpr,
     LG_LogicalExprLoweringFlags flags
 ) {

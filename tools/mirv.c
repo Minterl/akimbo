@@ -135,7 +135,7 @@ MRV_LexerContext {
     lg_str8        text;
     size_t         current_offset;
 
-    LG_Allocator  *artifact;
+    LG_Allocator   artifact;
 
     MRV_Error      err;
 } MRV_LexerContext;
@@ -149,7 +149,7 @@ MRV_LexerContext {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-mrv_tstream_append(MRV_TokenStream *tstream, LG_Allocator *artifact_allocator, MRV_Token tok) {
+mrv_tstream_append(MRV_TokenStream *tstream, LG_Allocator artifact_allocator, MRV_Token tok) {
     if (lg_likely(
         tstream->tail != NULL &&
         tstream->tail_len < MRV_TOKEN_STREAM_BLOCK_CAPACITY - 1
@@ -174,7 +174,7 @@ mrv_tstream_append(MRV_TokenStream *tstream, LG_Allocator *artifact_allocator, M
 }
 
 void
-mrv_tstream_destroy(MRV_TokenStream *tstream, LG_Allocator *artifact_allocator) {
+mrv_tstream_destroy(MRV_TokenStream *tstream, LG_Allocator artifact_allocator) {
     MRV_TokenStreamBlock *iter_block = tstream->tail;
     while (iter_block != NULL) {
         MRV_TokenStreamBlock *temp = iter_block->prev;
@@ -336,7 +336,7 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
 ////////////////////////////////////////////////////////////////////////////////
 
 MRV_TokenStream
-mrv_lex(LG_Allocator *artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
+mrv_lex(LG_Allocator artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
     MRV_LexerContext ctx = {
         .artifact = artifact_allocator,
         .text = text,
@@ -1381,14 +1381,14 @@ out:
 
 MRV_AST
 mrv_parse(
-    LG_Allocator *artifact_allocator,
-    LG_Allocator *scratch_allocator, 
+    LG_Allocator artifact_allocator,
+    LG_Allocator scratch_allocator, 
     LG_Writer *err_writer,
     MRV_TokenStream *tstream,
     lg_str8 text
 ) {
-    lg_assert(artifact_allocator != NULL);
-    lg_assert(scratch_allocator != NULL);
+    lg_assert(artifact_allocator.f != NULL);
+    lg_assert(scratch_allocator.f != NULL);
     lg_assert(tstream != NULL);
     lg_assert(tstream->tail->next == NULL);
 
@@ -2942,8 +2942,8 @@ out:
 
 void
 mrv_analyze(
-    LG_Allocator *artifact_allocator,
-    LG_Allocator *scratch_allocator,
+    LG_Allocator artifact_allocator,
+    LG_Allocator scratch_allocator,
     MRV_AST *ast,
     lg_str8 text,
     LG_Writer *err_writer,
@@ -3979,16 +3979,22 @@ mrv_gen_source(
 #include <stdio.h>
 #include <stdlib.h>
 
-void*
-alloc_libc(void *_, size_t bytes) {
-    (void)_;
-    return calloc(bytes, 1);
-}
-
-void 
-free_libc(void* _, void *ptr) {
-    (void)_;
-    return free(ptr);
+LG_AllocatorModeReturn
+libc_allocator_f(void *ctx, LG_AllocatorModeKind mode_kind, LG_AllocatorModeParams params) {
+    (void)ctx;
+    switch (mode_kind) {
+        case LG_AllocatorModeKind_Alloc:
+            return (LG_AllocatorModeReturn){ .alloc.ptr = malloc(params.alloc.size_bytes) };
+        case LG_AllocatorModeKind_Free:
+            free(params.free.ptr);
+            return (LG_AllocatorModeReturn){0};
+        case LG_AllocatorModeKind_GetDefaultPreAllocation:
+            return (LG_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 0 };
+        case LG_AllocatorModeKind_GetFlags:
+            return (LG_AllocatorModeReturn){ .get_flags.flags = 0};
+        default:
+            lg_unreachable();
+    }
 }
 
 size_t
@@ -3999,9 +4005,7 @@ write_stdout(void *ctx, lg_str8 msg) {
 
 static LG_Allocator 
 libc_allocator = {
-    .alloc = alloc_libc,
-    .free = free_libc,
-    .default_slab_size_bytes = 1024 * 1024 * 1024,
+    .f = libc_allocator_f,
 };
 
 static LG_Writer 
@@ -4014,7 +4018,7 @@ main(int32_t argc, char **argv) {
     int32_t ret_code = 0;
 
     LG_Arena scratch_allocator = {0};
-    lg_arena_init(&scratch_allocator, &libc_allocator);
+    lg_arena_init(&scratch_allocator, libc_allocator);
     
     lg_str8 *args = lg_arena_alloc_array(&scratch_allocator, lg_str8, argc);
     lg_assert(args != NULL);
@@ -4037,13 +4041,13 @@ main(int32_t argc, char **argv) {
     lg_assert(chunks_read > 0);
 
     lg_str8 text = (lg_str8){ .len = 4096, .p = file_contents };
-    MRV_TokenStream tstream = mrv_lex(&libc_allocator, text, &libc_writer);
+    MRV_TokenStream tstream = mrv_lex(libc_allocator, text, &libc_writer);
 
     (void)text;
 
     MRV_AST ast = mrv_parse(
-        &libc_allocator,
-        &libc_allocator,
+        libc_allocator,
+        libc_allocator,
         &libc_writer,
         &tstream,
         text
@@ -4051,8 +4055,8 @@ main(int32_t argc, char **argv) {
 
     MRV_LanguageDescriptor ldesc = {0};
     mrv_analyze(
-        &libc_allocator,
-        &libc_allocator,
+        libc_allocator,
+        libc_allocator,
         &ast,
         text,
         &libc_writer,
@@ -4090,7 +4094,7 @@ main(int32_t argc, char **argv) {
 out_destroy_ldesc:
     mrv_ldesc_destroy(&ldesc);
     mrv_ast_destroy(&ast);
-    mrv_tstream_destroy(&tstream, &libc_allocator);
+    mrv_tstream_destroy(&tstream, libc_allocator);
     fclose(file);
 out_free_all:
     lg_arena_free_all(&scratch_allocator);
