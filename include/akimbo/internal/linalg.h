@@ -1,5 +1,5 @@
-#ifndef AK_LINAAK_H_
-#define AK_LINAAK_H_
+#ifndef AK_LINALG_H_
+#define AK_LINALG_H_
 
 #include <akimbo/internal/base.h>
 #include <akimbo/internal/expr.h>
@@ -158,4 +158,4 @@ ak_create_contracted_iteration_space(
     AK_MappedSpace *out_space
 );
 
-#endif // AK_LINAAK_H_c
+#endif // AK_LINALG_H_
