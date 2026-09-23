@@ -1671,7 +1671,7 @@ MRV_Inst_Arg {
 typedef struct
 MRV_Inst_Lambda {
     MRV_Symbol  new_symbol;
-    uint32_t    args_len;
+    // implicit via language descriptor: uint32_t    args_len;
     uint32_t    body_len;
 } MRV_Inst_Lambda;
 
@@ -1910,8 +1910,8 @@ mrv_istream_dump(
 
             lg_printf(
                 writer,
-                lg_str8_lit("[%{i64}:Lambda] %{str}: (args_len = %{i64}, body_len = %{i64})"),
-                i, new_sym, istream->insts[i].as.lambda.args_len, istream->insts[i].as.lambda.body_len
+                lg_str8_lit("[%{i64}:Lambda] %{str}: (body_len = %{i64})"),
+                i, new_sym, istream->insts[i].as.lambda.body_len
             );
             if (mrv_ldesc_ref_is_valid(istream->symtab[new_sym_id].type)) {
                 lg_printf(writer, lg_str8_lit(" -> %{str}"), ret_type);
@@ -2654,7 +2654,6 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             .kind = MRV_InstKind_Lambda,
             .as.lambda = {
                 .new_symbol = new_symbol,
-                .args_len = n_args,
                 .body_len = 0, // backpatched
             },
         });
@@ -2863,7 +2862,6 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     {
         mrv_istream_append(state->istream, (MRV_Inst){
             .kind = MRV_InstKind_Lambda,
-            .as.lambda.args_len = n_args,
             .as.lambda.body_len = state->counting_n_insts,
         });
 
@@ -4061,31 +4059,39 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                     continue;
                 }
 
-                lg_str8 ret_type = mrv_ldesc_get_name(ctx->ldesc, istream.symtab[new_sym.id].type);
-                lg_str8 name = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
+                MRV_LanguageDescriptorRef lambda_type = istream.symtab[new_sym.id].type;
+                lg_str8 ret_type_str = mrv_ldesc_get_name(ctx->ldesc, lambda_type);
+                lg_str8 name_str = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
+                uint32_t n_args = 0;
+                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.left_arg_type)) {
+                    n_args++;
+                }
+                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.right_arg_type)) {
+                    n_args++;
+                }
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
                 lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                lg_strlist_append(&statements, ctx->scratch, ret_type);
+                lg_strlist_append(&statements, ctx->scratch, ret_type_str);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" "));
-                lg_strlist_append(&statements, ctx->scratch, name);
+                lg_strlist_append(&statements, ctx->scratch, name_str);
 
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" = ("));
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
                 lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                lg_strlist_append(&statements, ctx->scratch, ret_type);
+                lg_strlist_append(&statements, ctx->scratch, ret_type_str);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("){"));
                 indent++;
                 {
                     lg_str8 args_len;
-                    status = lg_sprintf(ctx->scratch, &args_len, lg_str8_lit(".args_len = %{i64},"), istream.insts[i].as.lambda.args_len);
+                    status = lg_sprintf(ctx->scratch, &args_len, lg_str8_lit(".args_len = %{i64},"), n_args);
                     lg_assert(status == LG_StatusKind_OK);
 
                     lg_str8 body_len;
-                    status = lg_sprintf(ctx->scratch, &body_len, lg_str8_lit(".body_len = %{i64},"), istream.insts[i].as.lambda.body_len);
+                    status = lg_sprintf(ctx->scratch, &body_len, lg_str8_lit(".body_len = %{i64},"), n_args);
                     lg_assert(status == LG_StatusKind_OK);
 
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
@@ -4098,7 +4104,7 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                 lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("};"));
 
-                uint32_t last_arg = i + istream.insts[i].as.lambda.args_len;
+                uint32_t last_arg = i + n_args;
                 i++; // skip the lambda node itself
                 while (true) {
                     lg_assert(istream.insts[i].kind == MRV_InstKind_Arg);
