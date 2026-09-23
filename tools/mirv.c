@@ -1,4 +1,4 @@
-#include <libgrad/internal/base.h>
+#include <akimbo/internal/base.h>
 
 #define MRV_TOKEN_STREAM_BLOCK_CAPACITY 1024
 #define MRV_MAX_ERR_LEN 1024
@@ -20,12 +20,12 @@ MRV_Span {
 typedef struct
 MRV_Error {
     bool       is_err;
-    LG_Writer *writer;
+    AK_Writer *writer;
     MRV_Span   span;
 } MRV_Error;
 
 void
-mrv_report_error(MRV_Error *err, MRV_Span span, lg_str8 fmt, ...) {
+mrv_report_error(MRV_Error *err, MRV_Span span, ak_str8 fmt, ...) {
     if (err->is_err) {
         return;
     }
@@ -33,15 +33,15 @@ mrv_report_error(MRV_Error *err, MRV_Span span, lg_str8 fmt, ...) {
     err->is_err = 1;
     err->span = span;
 
-    lg_printf(err->writer, lg_str8_lit("at offsets %{i64}-%{i64}:\n"), span.offset, span.offset + span.len);
+    ak_printf(err->writer, ak_str8_lit("at offsets %{i64}-%{i64}:\n"), span.offset, span.offset + span.len);
 
     va_list ap;
     va_start(ap, fmt);
-    LG_StatusKind vprintf_status = lg_vprintf(err->writer, fmt, ap);
+    AK_StatusKind vprintf_status = ak_vprintf(err->writer, fmt, ap);
     (void)vprintf_status;
     va_end(ap);
 
-    lg_write(err->writer, lg_str8_lit("\n"));
+    ak_write(err->writer, ak_str8_lit("\n"));
 }
 
 #define mrv_span_zero_len(offset_) (MRV_Span){ .offset = (offset_) }
@@ -92,15 +92,15 @@ enum {
 };
 
 const struct {
-    lg_str8 string; 
-    lg_str8 kind_string;
+    ak_str8 string; 
+    ak_str8 kind_string;
     uint32_t hash; 
 } 
 MRV_TOKEN_TABLE[MRV_TokenKind_COUNT] = {
 #   define MRV_X(kind, str) [MRV_TokenKind_##kind] = { \
-        .string = lg_str8_lit(str), \
-        .kind_string = lg_str8_lit(#kind), \
-        .hash = lg_hash_lit_16(str) \
+        .string = ak_str8_lit(str), \
+        .kind_string = ak_str8_lit(#kind), \
+        .hash = ak_hash_lit_16(str) \
     },
 MRV_DEFINE_TOKEN_KINDS
 #   undef MRV_X
@@ -132,10 +132,10 @@ MRV_TokenStream {
 
 typedef struct
 MRV_LexerContext {
-    lg_str8        text;
+    ak_str8        text;
     size_t         current_offset;
 
-    LG_Allocator   artifact;
+    AK_Allocator   artifact;
 
     MRV_Error      err;
 } MRV_LexerContext;
@@ -149,18 +149,18 @@ MRV_LexerContext {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-mrv_tstream_append(MRV_TokenStream *tstream, LG_Allocator artifact_allocator, MRV_Token tok) {
-    if (lg_likely(
+mrv_tstream_append(MRV_TokenStream *tstream, AK_Allocator artifact_allocator, MRV_Token tok) {
+    if (ak_likely(
         tstream->tail != NULL &&
         tstream->tail_len < MRV_TOKEN_STREAM_BLOCK_CAPACITY - 1
     )) {
-        lg_memcpy(tstream->tail->tokens + tstream->tail_len, &tok, sizeof(MRV_Token));
+        ak_memcpy(tstream->tail->tokens + tstream->tail_len, &tok, sizeof(MRV_Token));
         tstream->tail_len++;
         return;
     }
 
-    MRV_TokenStreamBlock *next_block = (MRV_TokenStreamBlock*)lg_alloc_zero(artifact_allocator, sizeof(MRV_TokenStreamBlock));
-    lg_assert(next_block != NULL);
+    MRV_TokenStreamBlock *next_block = (MRV_TokenStreamBlock*)ak_alloc_zero(artifact_allocator, sizeof(MRV_TokenStreamBlock));
+    ak_assert(next_block != NULL);
 
     if (tstream->tail != NULL) {
         tstream->tail->next = next_block;
@@ -174,44 +174,44 @@ mrv_tstream_append(MRV_TokenStream *tstream, LG_Allocator artifact_allocator, MR
 }
 
 void
-mrv_tstream_destroy(MRV_TokenStream *tstream, LG_Allocator artifact_allocator) {
+mrv_tstream_destroy(MRV_TokenStream *tstream, AK_Allocator artifact_allocator) {
     MRV_TokenStreamBlock *iter_block = tstream->tail;
     while (iter_block != NULL) {
         MRV_TokenStreamBlock *temp = iter_block->prev;
-        lg_free(artifact_allocator, iter_block);
+        ak_free(artifact_allocator, iter_block);
         iter_block = temp;
     }
-    lg_memzero(tstream, sizeof(MRV_TokenStream));
+    ak_memzero(tstream, sizeof(MRV_TokenStream));
 }
 
-lg_force_inline lg_str8
-mrv_span_to_str8(MRV_Span span, lg_str8 text) {
-    return (lg_str8){ .len = span.len, .p = text.p + span.offset };
+ak_force_inline ak_str8
+mrv_span_to_str8(MRV_Span span, ak_str8 text) {
+    return (ak_str8){ .len = span.len, .p = text.p + span.offset };
 }
 
-lg_force_inline uint8_t
+ak_force_inline uint8_t
 mrv_lexer_peek(MRV_LexerContext *ctx) {
-    if (lg_likely(ctx->current_offset < ctx->text.len - 1)) {
-        lg_assert(ctx->text.p[ctx->current_offset + 1] != '\0');
+    if (ak_likely(ctx->current_offset < ctx->text.len - 1)) {
+        ak_assert(ctx->text.p[ctx->current_offset + 1] != '\0');
         return ctx->text.p[ctx->current_offset + 1];
     }
     return '\0';
 }
 
-lg_force_inline void
+ak_force_inline void
 mrv_lexer_skip(MRV_LexerContext *ctx) {
-    if (lg_likely(ctx->current_offset < ctx->text.len)) {
+    if (ak_likely(ctx->current_offset < ctx->text.len)) {
         ctx->current_offset++;
     }
 }
 
-lg_force_inline bool
-mrv_lexer_match_sequence(MRV_LexerContext *ctx, lg_str8 seq, MRV_Span *lg_nullable out_span) {
+ak_force_inline bool
+mrv_lexer_match_sequence(MRV_LexerContext *ctx, ak_str8 seq, MRV_Span *ak_nullable out_span) {
     if (ctx->current_offset + seq.len >= ctx->text.len) {
         return false;
     }
-    lg_str8 next_n = (lg_str8){ .len = seq.len, .p = &ctx->text.p[ctx->current_offset]};
-    if (lg_strcmp(next_n, seq) == 0) {
+    ak_str8 next_n = (ak_str8){ .len = seq.len, .p = &ctx->text.p[ctx->current_offset]};
+    if (ak_strcmp(next_n, seq) == 0) {
         if (out_span != NULL) {
             *out_span = (MRV_Span) {
                 .offset = ctx->current_offset,
@@ -224,10 +224,10 @@ mrv_lexer_match_sequence(MRV_LexerContext *ctx, lg_str8 seq, MRV_Span *lg_nullab
     return false;
 }
 
-lg_force_inline MRV_Token
+ak_force_inline MRV_Token
 mrv_lexer_consume_char(MRV_LexerContext *ctx) {
     if (ctx->current_offset >= ctx->text.len) {
-        mrv_report_error(&ctx->err, mrv_span_zero_len(ctx->text.len), lg_str8_lit("unexpected EOF"));
+        mrv_report_error(&ctx->err, mrv_span_zero_len(ctx->text.len), ak_str8_lit("unexpected EOF"));
         return (MRV_Token){ .kind = MRV_TokenKind_Error };
     }
 
@@ -256,17 +256,17 @@ mrv_lexer_consume_char(MRV_LexerContext *ctx) {
     return tok;
 }
 
-lg_force_inline void
+ak_force_inline void
 mrv_lexer_skip_whitespace(MRV_LexerContext *ctx) {
     for (
         uint8_t ch_i = ctx->text.p[ctx->current_offset];
-        lg_char_is_whitespace(ch_i) && ctx->current_offset < ctx->text.len;
+        ak_char_is_whitespace(ch_i) && ctx->current_offset < ctx->text.len;
         ctx->current_offset++, ch_i = ctx->text.p[ctx->current_offset]
     );
 }
 
 
-lg_force_inline MRV_Token
+ak_force_inline MRV_Token
 mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
     MRV_Token tok = { 
         .kind = expected_kind,
@@ -280,19 +280,19 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
     while (ctx->current_offset < ctx->text.len) {
         uint8_t ch_i = ctx->text.p[ctx->current_offset];
 
-        if (lg_unlikely(ctx->current_offset >= ctx->text.len)) {
-            mrv_report_error(&ctx->err, tok.span, lg_str8_lit("unexpected EOF"));
+        if (ak_unlikely(ctx->current_offset >= ctx->text.len)) {
+            mrv_report_error(&ctx->err, tok.span, ak_str8_lit("unexpected EOF"));
             return (MRV_Token){ .kind = MRV_TokenKind_Error };
         } 
-        if (lg_unlikely(
+        if (ak_unlikely(
             is_first &&
             expected_kind == MRV_TokenKind_Ident &&
-            lg_char_is_numeric(ch_i)
+            ak_char_is_numeric(ch_i)
         )) {
-            mrv_report_error(&ctx->err, tok.span, lg_str8_lit("expected letter, found number"));
+            mrv_report_error(&ctx->err, tok.span, ak_str8_lit("expected letter, found number"));
            return (MRV_Token){ .kind = MRV_TokenKind_Error };
         }
-        if (lg_unlikely(!lg_char_is_alphanumeric(ch_i) && ch_i != '_')) {
+        if (ak_unlikely(!ak_char_is_alphanumeric(ch_i) && ch_i != '_')) {
             break;
         }
 
@@ -303,7 +303,7 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
     }
 
     if (tok.span.len == 0) {
-        mrv_report_error(&ctx->err, tok.span, lg_str8_lit("expected alphanumeric sequence"));
+        mrv_report_error(&ctx->err, tok.span, ak_str8_lit("expected alphanumeric sequence"));
         return (MRV_Token){ .kind = MRV_TokenKind_Error };
     }
     
@@ -311,8 +311,8 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
     /////////////////////////////////////////////////////
     /// ~~ scan for keywords ~~
 
-    lg_str8 ident_string = mrv_span_to_str8(tok.span, ctx->text);
-    uint32_t ident_hash = lg_hash_16(ident_string.p, ident_string.len);
+    ak_str8 ident_string = mrv_span_to_str8(tok.span, ctx->text);
+    uint32_t ident_hash = ak_hash_16(ident_string.p, ident_string.len);
 
     for (uint8_t kind = 0; kind < MRV_TokenKind_COUNT; kind++) {
         if (!mrv_token_kind_is_keyword(kind)) {
@@ -336,7 +336,7 @@ mrv_lexer_scan_ident(MRV_LexerContext *ctx, MRV_TokenKind expected_kind) {
 ////////////////////////////////////////////////////////////////////////////////
 
 MRV_TokenStream
-mrv_lex(LG_Allocator artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
+mrv_lex(AK_Allocator artifact_allocator, ak_str8 text, AK_Writer *err_writer) {
     MRV_LexerContext ctx = {
         .artifact = artifact_allocator,
         .text = text,
@@ -385,15 +385,15 @@ mrv_lex(LG_Allocator artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
 
         case '(': {
             MRV_Span span = {0};
-            if (mrv_lexer_match_sequence(&ctx, lg_str8_lit("(*"), NULL)) {
+            if (mrv_lexer_match_sequence(&ctx, ak_str8_lit("(*"), NULL)) {
                 mrv_lexer_skip(&ctx);
                 mrv_lexer_skip(&ctx);
-                const lg_str8 close = lg_str8_lit("*)");
+                const ak_str8 close = ak_str8_lit("*)");
                 while (!mrv_lexer_match_sequence(&ctx, close, NULL)) {
                     mrv_lexer_skip(&ctx);
                 }
                 mrv_lexer_skip(&ctx);
-            } else if (mrv_lexer_match_sequence(&ctx, lg_str8_lit("()"), &span)) {
+            } else if (mrv_lexer_match_sequence(&ctx, ak_str8_lit("()"), &span)) {
                 mrv_tstream_append(&tstream, artifact_allocator, (MRV_Token){ .span = span, .kind = MRV_TokenKind_Unit });
             } else {
                 goto single_char;
@@ -404,7 +404,7 @@ mrv_lex(LG_Allocator artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
 
         case '<': {
             MRV_Span span = {0};
-            if (!mrv_lexer_match_sequence(&ctx, lg_str8_lit("<<"), &span)) {
+            if (!mrv_lexer_match_sequence(&ctx, ak_str8_lit("<<"), &span)) {
                 goto unexpected_char;
             }
             mrv_tstream_append(&tstream, artifact_allocator, (MRV_Token){
@@ -416,7 +416,7 @@ mrv_lex(LG_Allocator artifact_allocator, lg_str8 text, LG_Writer *err_writer) {
 
         case '>': {
             MRV_Span span = {0};
-            const lg_str8 close = lg_str8_lit(">>");
+            const ak_str8 close = ak_str8_lit(">>");
             if (!mrv_lexer_match_sequence(&ctx, close, &span)) {
                 goto unexpected_char;
             }
@@ -448,13 +448,13 @@ single_char:
 unexpected_char:;
         default: {
             MRV_Span err_span = (MRV_Span){ .len = 1, .offset = ctx.current_offset };
-            lg_str8 unexpected_char = mrv_span_to_str8(err_span, ctx.text);
+            ak_str8 unexpected_char = mrv_span_to_str8(err_span, ctx.text);
 
             mrv_tstream_append(&tstream, ctx.artifact, (MRV_Token){
                 .kind = MRV_TokenKind_Error,
                 .span = err_span,
             });
-            mrv_report_error(&ctx.err, err_span, lg_str8_lit("unexpected character: %{str}"), unexpected_char);
+            mrv_report_error(&ctx.err, err_span, ak_str8_lit("unexpected character: %{str}"), unexpected_char);
 
             mrv_lexer_skip(&ctx);
         }
@@ -524,9 +524,9 @@ enum {
 #   undef MRV_X
 };
 
-lg_str8
+ak_str8
 MRV_AST_NODE_STRINGS[MRV_ASTNodeKind_COUNT] = {
-#   define MRV_X(kind, ...) [MRV_ASTNodeKind_##kind] = lg_str8_lit(#kind),
+#   define MRV_X(kind, ...) [MRV_ASTNodeKind_##kind] = ak_str8_lit(#kind),
     MRV_DEFINE_AST_NODE_KINDS
 #   undef MRV_X
 };
@@ -637,7 +637,7 @@ MRV_ASTNodeRefStack {
 
 typedef struct
 MRV_ParserContext {
-    lg_str8                text;
+    ak_str8                text;
 
     MRV_ASTNodeRefStack   *ref_stack_top;
 
@@ -646,9 +646,9 @@ MRV_ParserContext {
     size_t                 next_offset;
 
     MRV_Error              err;
-    LG_Arena              *scratch;
+    AK_Arena              *scratch;
 
-    LG_Arena               artifact;
+    AK_Arena               artifact;
     MRV_ASTNode           *nil_node;
 } MRV_ParserContext;
 
@@ -656,7 +656,7 @@ typedef struct
 MRV_AST {
     MRV_ASTNode  *nil_node;
     MRV_ASTNode  *root;
-    LG_Arena      artifact;
+    AK_Arena      artifact;
 } MRV_AST;
 
 #define mrv_parser_has_err(ctx) ((ctx)->err.is_err)
@@ -669,9 +669,9 @@ MRV_AST {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_parser_is_end(MRV_ParserContext *ctx) {
-    lg_assert(ctx->cur_block != NULL);
+    ak_assert(ctx->cur_block != NULL);
 
     return (
         ctx->cur_block->next == NULL &&
@@ -680,21 +680,21 @@ mrv_parser_is_end(MRV_ParserContext *ctx) {
     );
 }
 
-lg_force_inline MRV_ParserStatusKind 
+ak_force_inline MRV_ParserStatusKind 
 mrv_parser_find_next(
     MRV_ParserContext *ctx,
     size_t *out_next_offset,
     MRV_TokenStreamBlock **out_next_block
 ) {
-    lg_assert(ctx != NULL);
-    lg_assert(out_next_block != NULL);
-    lg_assert(out_next_offset != NULL);
+    ak_assert(ctx != NULL);
+    ak_assert(out_next_block != NULL);
+    ak_assert(out_next_offset != NULL);
 
     const size_t cur_len = ctx->cur_block == ctx->tstream->tail ? 
         ctx->tstream->tail_len :
         MRV_TOKEN_STREAM_BLOCK_CAPACITY;
 
-    if (lg_likely(ctx->next_offset < cur_len)) {
+    if (ak_likely(ctx->next_offset < cur_len)) {
         *out_next_block = ctx->cur_block;
         *out_next_offset = ctx->next_offset + 1;
         return MRV_ParserStatusKind_OK;
@@ -712,12 +712,12 @@ mrv_parser_find_next(
 
 MRV_Token
 mrv_parser_consume(MRV_ParserContext *ctx) {
-    lg_assert(ctx != NULL);
+    ak_assert(ctx != NULL);
 
     size_t next_offset;
     MRV_TokenStreamBlock *next_block;
     MRV_ParserStatusKind status = mrv_parser_find_next(ctx, &next_offset, &next_block);
-    lg_assert(status == MRV_ParserStatusKind_OK); // this function shouldn't be called where there isn't a next token
+    ak_assert(status == MRV_ParserStatusKind_OK); // this function shouldn't be called where there isn't a next token
                          // e.g don't expect a token after an EOF
                          // TODO: this assumption may case nodes with variadic children left unterminated
                          // to crash the parser
@@ -734,8 +734,8 @@ mrv_parser_expect(
     MRV_ParserContext *ctx,
     MRV_TokenKind expected_kind
 ) {
-    lg_assert(ctx != NULL);
-    lg_assert(expected_kind != MRV_TokenKind_Error);
+    ak_assert(ctx != NULL);
+    ak_assert(expected_kind != MRV_TokenKind_Error);
 
     MRV_Token next_token = mrv_parser_consume(ctx);
 
@@ -743,12 +743,12 @@ mrv_parser_expect(
         mrv_report_error(
             &ctx->err,
             next_token.span,
-            lg_str8_lit("expected %{str}, found string \"%{str}\" of token kind %{str}"), 
+            ak_str8_lit("expected %{str}, found string \"%{str}\" of token kind %{str}"), 
             mrv_token_as_str(expected_kind),    
             mrv_span_to_str8(next_token.span, ctx->text),
             mrv_token_as_str(next_token.kind)
         );
-        return lg_nil(MRV_Token);        
+        return ak_nil(MRV_Token);        
     }
 
     return next_token;
@@ -768,27 +768,27 @@ mrv_parser_peek(MRV_ParserContext *ctx) {
 ////////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
-/// note: with these nrs helpers, you still have to use lg_push/pop_scope
+/// note: with these nrs helpers, you still have to use ak_push/pop_scope
 
-lg_force_inline MRV_ASTNode*
+ak_force_inline MRV_ASTNode*
 mrv_parser_nil_node(MRV_ParserContext *ctx) {
-    lg_assert(ctx != NULL);
-    lg_assert(ctx->nil_node != NULL);
-    lg_memzero(ctx->nil_node, sizeof(MRV_ASTNode));
+    ak_assert(ctx != NULL);
+    ak_assert(ctx->nil_node != NULL);
+    ak_memzero(ctx->nil_node, sizeof(MRV_ASTNode));
     return ctx->nil_node;
 }
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_parser_is_nil_node(MRV_ParserContext *ctx, MRV_ASTNode *node) {
-    lg_assert(ctx != NULL);
-    lg_assert(ctx->nil_node != NULL);
+    ak_assert(ctx != NULL);
+    ak_assert(ctx->nil_node != NULL);
     return node == ctx->nil_node;
 }
 
-lg_force_inline void
+ak_force_inline void
 mrv_parser_nrs_push(MRV_ParserContext *ctx, MRV_ASTNode *to) {
-    MRV_ASTNodeRefStack* to_push = (MRV_ASTNodeRefStack*)lg_arena_alloc_struct(ctx->scratch, MRV_ASTNodeRefStack);
-    lg_assert(to_push != NULL);
+    MRV_ASTNodeRefStack* to_push = (MRV_ASTNodeRefStack*)ak_arena_alloc_struct(ctx->scratch, MRV_ASTNodeRefStack);
+    ak_assert(to_push != NULL);
 
     to_push->to = to;
 
@@ -798,14 +798,14 @@ mrv_parser_nrs_push(MRV_ParserContext *ctx, MRV_ASTNode *to) {
     ctx->ref_stack_top = to_push;
 }
 
-lg_force_inline MRV_ASTNode**
+ak_force_inline MRV_ASTNode**
 mrv_parser_nrs_unwind_cpy(MRV_ParserContext *ctx, uint32_t n_refs) {
     if (n_refs == 0) {
         return NULL;
     }
 
-    MRV_ASTNode **refs = lg_arena_alloc_array(&ctx->artifact, MRV_ASTNode*, n_refs);
-    lg_assert(refs != NULL);
+    MRV_ASTNode **refs = ak_arena_alloc_array(&ctx->artifact, MRV_ASTNode*, n_refs);
+    ak_assert(refs != NULL);
 
     uint32_t i = 0;
     while (ctx->ref_stack_top != NULL && i < n_refs) {
@@ -832,10 +832,10 @@ mrv_parser_nrs_unwind_cpy(MRV_ParserContext *ctx, uint32_t n_refs) {
     (MRV_ASTNodeChildren){ .kind = {__VA_ARGS__} } \
 )
 
-lg_force_inline MRV_ASTNode*
+ak_force_inline MRV_ASTNode*
 mrv_parser_mknode_(MRV_ParserContext *ctx, MRV_ASTNodeKind kind, MRV_Span span, MRV_ASTNodeChildren children) {
-    MRV_ASTNode *node = lg_arena_alloc_struct(&ctx->artifact, MRV_ASTNode);
-    lg_assert(node != NULL);
+    MRV_ASTNode *node = ak_arena_alloc_struct(&ctx->artifact, MRV_ASTNode);
+    ak_assert(node != NULL);
 
     node->kind = kind;
     node->span = span;
@@ -844,16 +844,16 @@ mrv_parser_mknode_(MRV_ParserContext *ctx, MRV_ASTNodeKind kind, MRV_Span span, 
     return node;
 }
 
-lg_force_inline MRV_Span
+ak_force_inline MRV_Span
 mrv_get_bounding_span(MRV_ParserContext *ctx, size_t n_nodes, MRV_ASTNode **nodes) {
     if (n_nodes == 0) {
-        return lg_nil(MRV_Span);
+        return ak_nil(MRV_Span);
     }
 
     size_t min_offset = SIZE_MAX,
            max_offset = 0;
     for (size_t i = 0; i < n_nodes; i++) {
-        lg_assert(nodes[i] != NULL);
+        ak_assert(nodes[i] != NULL);
 
         if (mrv_parser_is_nil_node(ctx, nodes[i])) {
             continue;
@@ -872,12 +872,12 @@ mrv_get_bounding_span(MRV_ParserContext *ctx, size_t n_nodes, MRV_ASTNode **node
     return (MRV_Span){ .offset = min_offset, .len = max_offset - min_offset };
 }
 
-lg_force_inline void
+ak_force_inline void
 mrv_parser_unexpected_token(MRV_ParserContext *ctx, MRV_Token tok, MRV_ASTNodeKind parent) {
     mrv_report_error(
         &ctx->err,
         tok.span,
-        lg_str8_lit("unexpected token: \"%{str}\" of token kind %{str} in %{str} node"),
+        ak_str8_lit("unexpected token: \"%{str}\" of token kind %{str} in %{str} node"),
         mrv_span_to_str8(tok.span, ctx->text),
         mrv_token_as_str(tok.kind),
         mrv_ast_node_kind_as_str(parent)
@@ -963,7 +963,7 @@ mrv_parse_decl_arg(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_decl_arg_list(MRV_ParserContext *ctx, bool is_binary) {
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -995,7 +995,7 @@ loop_end:;
     MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
 
     if (n_children > 2 && is_binary) {
-        mrv_report_error(&ctx->err, all_span, lg_str8_lit(
+        mrv_report_error(&ctx->err, all_span, ak_str8_lit(
             "all operators must be pure three-address code\n"
             "this argument list has %{i64} arguments"
         ), n_children);
@@ -1010,14 +1010,14 @@ loop_end:;
         .n_args = n_children
     );
 
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
 
     return node;
 }
 
 MRV_ASTNode*
 mrv_parse_invocation_arg_list(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -1071,7 +1071,7 @@ loop_end:;
         .n_args = n_children
     );
 
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
 
     return node;
 
@@ -1162,7 +1162,7 @@ mrv_parse_assignment_statement(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_block(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
 
     uint32_t n_children = 0;
 
@@ -1201,7 +1201,7 @@ loop_end:;
     MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
     MRV_ASTNode *node = mrv_parser_mknode(ctx, Block, all_span, .n_statements = n_children, .statements = children);
 
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
     return node;
 }
 
@@ -1311,7 +1311,7 @@ mrv_parse_operator_decl(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_program(MRV_ParserContext *ctx) {
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
     MRV_ASTNode *root = mrv_parser_nil_node(ctx);
     size_t n_children = 0;
 
@@ -1351,7 +1351,7 @@ mrv_parse_program(MRV_ParserContext *ctx) {
         }
 
         case MRV_TokenKind_Error: 
-            lg_unreachable();
+            ak_unreachable();
 
         default: {
             mrv_parser_unexpected_token(ctx, tok, MRV_ASTNodeKind_Program);
@@ -1369,27 +1369,27 @@ loop_end:;
     MRV_ASTNode **children = mrv_parser_nrs_unwind_cpy(ctx, n_children);
     MRV_Span all_span = mrv_get_bounding_span(ctx, n_children, children);
     root = mrv_parser_mknode(ctx, Program, all_span, .n_children = n_children, children = children);
-    lg_assert(root != NULL);
+    ak_assert(root != NULL);
 
     root->kind = MRV_ASTNodeKind_Program;
     root->span = tok.span;
 
 out:
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
     return root;
 }
 
 MRV_AST
 mrv_parse(
-    LG_Allocator artifact_allocator,
-    LG_Arena *scratch_allocator, 
-    LG_Writer *err_writer,
+    AK_Allocator artifact_allocator,
+    AK_Arena *scratch_allocator, 
+    AK_Writer *err_writer,
     MRV_TokenStream *tstream,
-    lg_str8 text
+    ak_str8 text
 ) {
-    lg_assert(artifact_allocator.f != NULL);
-    lg_assert(tstream != NULL);
-    lg_assert(tstream->tail->next == NULL);
+    ak_assert(artifact_allocator.f != NULL);
+    ak_assert(tstream != NULL);
+    ak_assert(tstream->tail->next == NULL);
     
     /////////////////////////////////////
     /// ~~ initialize the parser ~~
@@ -1408,11 +1408,11 @@ mrv_parse(
         iter_block = iter_block->prev;
     }
 
-    LG_Scope scope = lg_push_scope(scratch_allocator);
-    lg_arena_init(&ctx.artifact, artifact_allocator);
+    AK_Scope scope = ak_push_scope(scratch_allocator);
+    ak_arena_init(&ctx.artifact, artifact_allocator);
 
-    ctx.nil_node = lg_arena_alloc_struct(&ctx.artifact, MRV_ASTNode);
-    lg_assert(ctx.nil_node != NULL);
+    ctx.nil_node = ak_arena_alloc_struct(&ctx.artifact, MRV_ASTNode);
+    ak_assert(ctx.nil_node != NULL);
 
 
     /////////////////////////////////////
@@ -1425,28 +1425,28 @@ mrv_parse(
         .artifact = ctx.artifact,
     };
 
-    lg_pop_scope(scratch_allocator, scope);
+    ak_pop_scope(scratch_allocator, scope);
 
     return ast;
 }
 
 void
 mrv_ast_destroy(MRV_AST *ast) {
-    lg_arena_free_all(&ast->artifact);
-    lg_memzero(ast, sizeof(MRV_AST));
+    ak_arena_free_all(&ast->artifact);
+    ak_memzero(ast, sizeof(MRV_AST));
 }
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_ast_is_root(MRV_AST *ast, MRV_ASTNode *node) {
-    lg_assert(ast != NULL);
-    lg_assert(ast->root != NULL);
+    ak_assert(ast != NULL);
+    ak_assert(ast->root != NULL);
     return node == ast->root;
 }
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_ast_is_nil_node(MRV_AST *ast, MRV_ASTNode *node) {
-    lg_assert(ast != NULL);
-    lg_assert(ast->nil_node != NULL);
+    ak_assert(ast != NULL);
+    ak_assert(ast->nil_node != NULL);
     return node == ast->nil_node;
 }
 
@@ -1461,20 +1461,20 @@ mrv_ast_is_nil_node(MRV_AST *ast, MRV_ASTNode *node) {
 typedef struct
 MRV_ASTDumpContext {
     MRV_AST    *ast;
-    LG_Writer  *writer;
-    lg_str8     text;
+    AK_Writer  *writer;
+    ak_str8     text;
     int8_t      indent;
 } MRV_ASTDumpContext;
 
-lg_force_inline void
+ak_force_inline void
 mrv_ast_dump_indent(MRV_ASTDumpContext *ctx) {
     for (int8_t i = 0; i < ctx->indent; i++) {
-        lg_write(ctx->writer, lg_str8_lit("    "));
+        ak_write(ctx->writer, ak_str8_lit("    "));
     }
 }
 
 void
-mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_ASTNode *self) {
+mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *ak_nullable parent, MRV_ASTNode *self) {
     if (mrv_ast_is_nil_node(ctx->ast, self)) {
         return;
     }
@@ -1556,16 +1556,16 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
             break;
 
         case MRV_ASTNodeKind_Block:
-            lg_write(ctx->writer, lg_str8_lit("\n"));
+            ak_write(ctx->writer, ak_str8_lit("\n"));
             mrv_ast_dump_indent(ctx);
-            lg_printf(ctx->writer, lg_str8_lit("subgraph \"cluster_%{i64}\" {\n"), self);
+            ak_printf(ctx->writer, ak_str8_lit("subgraph \"cluster_%{i64}\" {\n"), self);
             ctx->indent++;
             for (uint32_t i = 0; i < as.Block.n_statements; i++) {
                 mrv_ast_dump_r(ctx, self, as.Block.statements[i]);
             }
             ctx->indent--;
             mrv_ast_dump_indent(ctx);
-            lg_write(ctx->writer, lg_str8_lit("}\n\n"));
+            ak_write(ctx->writer, ak_str8_lit("}\n\n"));
             break;
 
         case MRV_ASTNodeKind_AssignmentStatement:
@@ -1579,32 +1579,32 @@ mrv_ast_dump_r(MRV_ASTDumpContext *ctx, MRV_ASTNode *lg_nullable parent, MRV_AST
         }
 
     mrv_ast_dump_indent(ctx);
-    lg_printf(ctx->writer, lg_str8_lit("\"node_%{i64}\""), self);
-    lg_str8 kind_str = mrv_ast_node_kind_as_str(self->kind);
+    ak_printf(ctx->writer, ak_str8_lit("\"node_%{i64}\""), self);
+    ak_str8 kind_str = mrv_ast_node_kind_as_str(self->kind);
     if (is_leaf) {
-        lg_printf(ctx->writer, lg_str8_lit(" [label=\"%{str} (\\\"%{str}\\\")\"];\n"), kind_str, mrv_span_to_str8(self->span, ctx->text));
+        ak_printf(ctx->writer, ak_str8_lit(" [label=\"%{str} (\\\"%{str}\\\")\"];\n"), kind_str, mrv_span_to_str8(self->span, ctx->text));
     } else {
-        lg_printf(ctx->writer, lg_str8_lit(" [label=\"%{str}\"];\n"), kind_str);
+        ak_printf(ctx->writer, ak_str8_lit(" [label=\"%{str}\"];\n"), kind_str);
     }
 
     if (parent != NULL) {
         mrv_ast_dump_indent(ctx);
-        lg_printf(ctx->writer, lg_str8_lit("\"node_%{i64}\""), parent);
-        lg_write(ctx->writer, lg_str8_lit(" -> "));
-        lg_printf(ctx->writer, lg_str8_lit("\"node_%{i64}\""), self);
-        lg_write(ctx->writer, lg_str8_lit(";\n"));
+        ak_printf(ctx->writer, ak_str8_lit("\"node_%{i64}\""), parent);
+        ak_write(ctx->writer, ak_str8_lit(" -> "));
+        ak_printf(ctx->writer, ak_str8_lit("\"node_%{i64}\""), self);
+        ak_write(ctx->writer, ak_str8_lit(";\n"));
     }
 }
 
 void
-mrv_ast_dump(MRV_AST *ast, LG_Writer *writer, lg_str8 text) {
+mrv_ast_dump(MRV_AST *ast, AK_Writer *writer, ak_str8 text) {
     MRV_ASTDumpContext ctx = {
         .ast = ast,
         .writer = writer,
         .text = text,
     };
 
-    lg_write(writer, lg_str8_lit(
+    ak_write(writer, ak_str8_lit(
         "digraph Abstract_Syntax_Tree {\n"
         // "     size=\"11,8.5!\";\n"
         // "     ratio=\"fill\";\n"
@@ -1613,7 +1613,7 @@ mrv_ast_dump(MRV_AST *ast, LG_Writer *writer, lg_str8 text) {
     ctx.indent++;
     mrv_ast_dump_r(&ctx, NULL, ast->root);
     ctx.indent--;
-    lg_write(writer, lg_str8_lit("}\n"));
+    ak_write(writer, ak_str8_lit("}\n"));
 }
 
 
@@ -1653,7 +1653,7 @@ MRV_LanguageDescriptorRef {
     uint32_t donttouchme;
 } MRV_LanguageDescriptorRef;
 
-lg_static_assert(sizeof(MRV_LanguageDescriptorRef) == 4);
+ak_static_assert(sizeof(MRV_LanguageDescriptorRef) == 4);
 
 typedef struct
 MRV_Inst_Invocation {
@@ -1696,10 +1696,10 @@ typedef struct
 MRV_InstStream {
     uint32_t cap;
     uint32_t len;
-    MRV_Inst *insts lg_check_bounds(cap);
+    MRV_Inst *insts ak_check_bounds(cap);
 
     uint32_t symtab_cap;
-    MRV_SymbolTable *symtab lg_check_bounds(symtab_cap);
+    MRV_SymbolTable *symtab ak_check_bounds(symtab_cap);
 } MRV_InstStream;
 
 typedef uint8_t
@@ -1723,7 +1723,7 @@ typedef struct
 MRV_LanguageDescriptorEntry {
     MRV_LanguageDescriptorEntryKind kind;
 
-    lg_str8 name;
+    ak_str8 name;
 
     union {
         struct {
@@ -1736,8 +1736,8 @@ MRV_LanguageDescriptorEntry {
         } type;
 
         struct {
-            lg_str8                    left_arg_name;
-            lg_str8                    right_arg_name;
+            ak_str8                    left_arg_name;
+            ak_str8                    right_arg_name;
             MRV_LanguageDescriptorRef  left_arg_type;
             MRV_LanguageDescriptorRef  right_arg_type;
             MRV_LanguageDescriptorRef  return_type;
@@ -1751,15 +1751,15 @@ MRV_LanguageDescriptorEntry {
 
 typedef struct
 MRV_LanguageDescriptor {
-    LG_Arena                      arena;
-    lg_str8                       language_name;
-    LG_Table                      table;
+    AK_Arena                      arena;
+    ak_str8                       language_name;
+    AK_Table                      table;
     MRV_LanguageDescriptorEntry  *entries;
 } MRV_LanguageDescriptor;
 
 typedef struct
 MRV_NameResolutionStackNode {
-    lg_str8 str_ident;
+    ak_str8 str_ident;
     MRV_Symbol symbol;
     uint32_t scope_depth;
 } MRV_NameResolutionStackNode;
@@ -1769,63 +1769,63 @@ MRV_NameResolutionStack {
     uint32_t next_symbol_id;
     uint32_t max_height_cap;
     uint32_t current_height;
-    MRV_NameResolutionStackNode *nodes lg_check_bounds(max_height_cap);
+    MRV_NameResolutionStackNode *nodes ak_check_bounds(max_height_cap);
 } MRV_NameResolutionStack;
 
 #define mrv_match_inst(kind) switch ((enum MRV_InstKind)kind)
 
-lg_force_inline MRV_LanguageDescriptorRef
+ak_force_inline MRV_LanguageDescriptorRef
 mrv_ldesc_ref_from_idx(uint32_t idx) {
     return (MRV_LanguageDescriptorRef){
         .donttouchme = (idx << 1) | 1,
     };
 }
 
-lg_force_inline uint32_t
+ak_force_inline uint32_t
 mrv_ldesc_ref_get_idx(MRV_LanguageDescriptorRef ref) {
     return (ref.donttouchme & ~(0x1)) >> 1;
 }
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_ldesc_ref_is_valid(MRV_LanguageDescriptorRef ref) {
     return ref.donttouchme & 1;
 }
 
-lg_force_inline bool
+ak_force_inline bool
 mrv_ldesc_ref_eq(MRV_LanguageDescriptorRef lhs, MRV_LanguageDescriptorRef rhs) {
     uint32_t left_idx = mrv_ldesc_ref_get_idx(lhs);
     uint32_t right_idx = mrv_ldesc_ref_get_idx(rhs);
     return left_idx == right_idx;
 }
 
-lg_str8
+ak_str8
 mrv_ldesc_get_name(
     MRV_LanguageDescriptor *ldesc,
     MRV_LanguageDescriptorRef ref
 ) {
-    if (lg_likely(mrv_ldesc_ref_is_valid(ref))) {
-        lg_str8 name = ldesc->entries[mrv_ldesc_ref_get_idx(ref)].name;
-        lg_assert(name.len > 0 && name.p != NULL);
+    if (ak_likely(mrv_ldesc_ref_is_valid(ref))) {
+        ak_str8 name = ldesc->entries[mrv_ldesc_ref_get_idx(ref)].name;
+        ak_assert(name.len > 0 && name.p != NULL);
         return name;
     }
-    return lg_nil(lg_str8);
+    return ak_nil(ak_str8);
 }
 
 void
 mrv_istream_init(
     MRV_InstStream *istream,
-    LG_Arena *arena,
+    AK_Arena *arena,
     uint32_t cap,
     uint32_t max_symbol_id
 ) {
-    lg_memzero(istream, sizeof(MRV_InstStream));
+    ak_memzero(istream, sizeof(MRV_InstStream));
 
-    MRV_Inst *insts = lg_arena_alloc_array(arena, MRV_Inst, cap);
-    lg_assert(insts != NULL);
+    MRV_Inst *insts = ak_arena_alloc_array(arena, MRV_Inst, cap);
+    ak_assert(insts != NULL);
 
     size_t symtab_cap = max_symbol_id + 1;
-    MRV_SymbolTable *symtab = lg_arena_alloc_array(arena, MRV_SymbolTable, symtab_cap);
-    lg_assert(symtab != NULL);
+    MRV_SymbolTable *symtab = ak_arena_alloc_array(arena, MRV_SymbolTable, symtab_cap);
+    ak_assert(symtab != NULL);
 
     istream->cap = cap;
     istream->symtab_cap = symtab_cap;
@@ -1839,7 +1839,7 @@ mrv_istream_append(
     MRV_InstStream *istream,
     MRV_Inst inst
 ) {
-    lg_assert(istream->len + 1 < istream->cap);
+    ak_assert(istream->len + 1 < istream->cap);
 
     uint32_t idx = istream->len;
 
@@ -1852,71 +1852,71 @@ mrv_istream_append(
 void
 mrv_istream_dump(
     MRV_InstStream *istream,
-    LG_Writer *writer,
+    AK_Writer *writer,
     MRV_LanguageDescriptor *ldesc,
-    lg_str8 text
+    ak_str8 text
 ) {
     for (uint32_t i = 0; i < istream->len; i++) {
         mrv_match_inst(istream->insts[i].kind) {
         case MRV_InstKind_NOP:
-            lg_printf(writer, lg_str8_lit("[%{i64}:NOP]\n"), i);
+            ak_printf(writer, ak_str8_lit("[%{i64}:NOP]\n"), i);
             break;
         case MRV_InstKind_Invocation: {
-            lg_printf(writer, lg_str8_lit("[%{i64}:Invocation] "), i);
+            ak_printf(writer, ak_str8_lit("[%{i64}:Invocation] "), i);
 
             uint32_t new_sym_id = istream->insts[i].as.invocation.new_symbol.id;
-            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
+            ak_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            ak_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
             if (new_sym_id != 0) {
-                lg_printf(writer, lg_str8_lit("%{str}: %{str} = "), new_sym, new_sym_type);
+                ak_printf(writer, ak_str8_lit("%{str}: %{str} = "), new_sym, new_sym_type);
             }
 
-            lg_str8 op = mrv_ldesc_get_name(ldesc, istream->insts[i].as.invocation.operator);
-            lg_printf(writer, lg_str8_lit("%{str} ("), op);
+            ak_str8 op = mrv_ldesc_get_name(ldesc, istream->insts[i].as.invocation.operator);
+            ak_printf(writer, ak_str8_lit("%{str} ("), op);
 
             uint32_t left_arg_id = istream->insts[i].as.invocation.left_arg.id;
             if (left_arg_id != 0) {
-                lg_str8 new_sym = mrv_span_to_str8(istream->symtab[left_arg_id].ident_span, text);
-                lg_write(writer, new_sym);
+                ak_str8 new_sym = mrv_span_to_str8(istream->symtab[left_arg_id].ident_span, text);
+                ak_write(writer, new_sym);
             }
 
             uint32_t right_arg_id = istream->insts[i].as.invocation.right_arg.id;
             if (right_arg_id != 0) {
-                lg_str8 new_sym = mrv_span_to_str8(istream->symtab[right_arg_id].ident_span, text);
-                lg_printf(writer, lg_str8_lit(", %{str}"), new_sym);
+                ak_str8 new_sym = mrv_span_to_str8(istream->symtab[right_arg_id].ident_span, text);
+                ak_printf(writer, ak_str8_lit(", %{str}"), new_sym);
             }
 
-            lg_write(writer, lg_str8_lit(");\n"));
+            ak_write(writer, ak_str8_lit(");\n"));
 
             break;
         }
         case MRV_InstKind_Arg: {
             uint32_t new_sym_id = istream->insts[i].as.arg.sym.id;
-            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
+            ak_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            ak_str8 new_sym_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
 
-            lg_printf(writer, lg_str8_lit("[%{i64}:Arg] %{str}: %{str};\n"), i, new_sym, new_sym_type);
+            ak_printf(writer, ak_str8_lit("[%{i64}:Arg] %{str}: %{str};\n"), i, new_sym, new_sym_type);
 
             break;
         }
         case MRV_InstKind_Lambda: {
             uint32_t new_sym_id = istream->insts[i].as.lambda.new_symbol.id;
-            lg_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
-            lg_str8 ret_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
+            ak_str8 new_sym = mrv_span_to_str8(istream->symtab[new_sym_id].ident_span, text);
+            ak_str8 ret_type = mrv_ldesc_get_name(ldesc, istream->symtab[new_sym_id].type);
 
             if (new_sym.len == 0) {
-                new_sym = lg_str8_lit("(anon)");
+                new_sym = ak_str8_lit("(anon)");
             }
 
-            lg_printf(
+            ak_printf(
                 writer,
-                lg_str8_lit("[%{i64}:Lambda] %{str}: (body_len = %{i64})"),
+                ak_str8_lit("[%{i64}:Lambda] %{str}: (body_len = %{i64})"),
                 i, new_sym, istream->insts[i].as.lambda.body_len
             );
             if (mrv_ldesc_ref_is_valid(istream->symtab[new_sym_id].type)) {
-                lg_printf(writer, lg_str8_lit(" -> %{str}"), ret_type);
+                ak_printf(writer, ak_str8_lit(" -> %{str}"), ret_type);
             }
-            lg_write(writer, lg_str8_lit(";\n"));
+            ak_write(writer, ak_str8_lit(";\n"));
 
             break;
         }
@@ -1925,11 +1925,11 @@ mrv_istream_dump(
 }
 
 void
-mrv_nrstack_init(MRV_NameResolutionStack *nrstack, LG_Arena *arena, uint32_t max_height_cap) {
-    MRV_NameResolutionStackNode *nodes = lg_arena_alloc_array(arena, MRV_NameResolutionStackNode, max_height_cap);
-    lg_assert(nodes != NULL);
+mrv_nrstack_init(MRV_NameResolutionStack *nrstack, AK_Arena *arena, uint32_t max_height_cap) {
+    MRV_NameResolutionStackNode *nodes = ak_arena_alloc_array(arena, MRV_NameResolutionStackNode, max_height_cap);
+    ak_assert(nodes != NULL);
 
-    lg_memzero(nrstack, sizeof(MRV_NameResolutionStack));
+    ak_memzero(nrstack, sizeof(MRV_NameResolutionStack));
     nrstack->nodes = nodes;
     nrstack->max_height_cap = max_height_cap;
 }
@@ -1937,10 +1937,10 @@ mrv_nrstack_init(MRV_NameResolutionStack *nrstack, LG_Arena *arena, uint32_t max
 MRV_Symbol
 mrv_nrstack_push(
     MRV_NameResolutionStack *nrstack,
-    lg_str8 str_ident
+    ak_str8 str_ident
 ) {
-    lg_assert(nrstack != NULL);
-    lg_assert(nrstack->current_height + 1 <= nrstack->max_height_cap);
+    ak_assert(nrstack != NULL);
+    ak_assert(nrstack->current_height + 1 <= nrstack->max_height_cap);
 
     uint32_t depth = 0;
     if (nrstack->current_height > 0) {
@@ -1965,11 +1965,11 @@ mrv_nrstack_push(
 MRV_Symbol
 mrv_nrstack_find_name(
     MRV_NameResolutionStack *nrstack,
-    lg_str8 name,
-    bool *lg_nullable out_found
+    ak_str8 name,
+    bool *ak_nullable out_found
 ) {
     for (uint32_t depth = nrstack->current_height; depth > 0; depth--) {
-        if (lg_strcmp(nrstack->nodes[depth - 1].str_ident, name) == 0) {
+        if (ak_strcmp(nrstack->nodes[depth - 1].str_ident, name) == 0) {
             if (out_found != NULL) {
                 *out_found = true;
             }
@@ -1979,15 +1979,15 @@ mrv_nrstack_find_name(
     if (out_found != NULL) {
         *out_found = false;
     }
-    return lg_nil(MRV_Symbol);
+    return ak_nil(MRV_Symbol);
 }
 
 MRV_Symbol
 mrv_nrstack_push_first_in_scope(
     MRV_NameResolutionStack *nrstack,
-    lg_str8 str_ident
+    ak_str8 str_ident
 ) {
-    lg_assert(nrstack != NULL);
+    ak_assert(nrstack != NULL);
     MRV_Symbol sym = mrv_nrstack_push(nrstack, str_ident);
     nrstack->nodes[nrstack->current_height - 1].scope_depth++;
     return sym;
@@ -1995,7 +1995,7 @@ mrv_nrstack_push_first_in_scope(
 
 uint32_t
 mrv_nrstack_get_scope_depth(MRV_NameResolutionStack *nrstack) {
-    lg_assert(nrstack != NULL);
+    ak_assert(nrstack != NULL);
     return nrstack->current_height > 0 ?
         nrstack->nodes[nrstack->current_height - 1].scope_depth :
         0;
@@ -2003,7 +2003,7 @@ mrv_nrstack_get_scope_depth(MRV_NameResolutionStack *nrstack) {
 
 void
 mrv_nrstack_pop_scope(MRV_NameResolutionStack *nrstack) {
-    lg_assert(nrstack != NULL);
+    ak_assert(nrstack != NULL);
 
     uint32_t depth = 0;
     if (nrstack->current_height > 0) {
@@ -2039,16 +2039,16 @@ MRV_SemaPhaseState {
 typedef struct
 MRV_SemaContext {
     MRV_AST                *ast;
-    lg_str8                 text;
+    ak_str8                 text;
     MRV_LanguageDescriptor  ldesc;
     MRV_Error               err;
-    LG_Arena               *scratch;
+    AK_Arena               *scratch;
     MRV_SemaPhaseState      phase_state;
 } MRV_SemaContext;
 
 typedef void (*MRV_SemaVisitor)(MRV_SemaContext *ctx, MRV_ASTNode *self);
 
-lg_force_inline void
+ak_force_inline void
 mrv_sema_traverse_children(
     MRV_SemaContext *ctx,
     MRV_ASTNode *self,
@@ -2066,7 +2066,7 @@ mrv_sema_traverse_children(
 
     case MRV_ASTNodeKind_Program:
         for (uint32_t i = 0; i < as.Program.n_children; i++) {
-            lg_assert(
+            ak_assert(
                 as.Program.children[i]->kind == MRV_ASTNodeKind_CombinatorDeclaration ||
                 as.Program.children[i]->kind == MRV_ASTNodeKind_TypeDeclaration ||
                 as.Program.children[i]->kind == MRV_ASTNodeKind_OperatorDeclaration ||
@@ -2077,8 +2077,8 @@ mrv_sema_traverse_children(
         break;
 
     case MRV_ASTNodeKind_SymbolDeclaration: {
-        lg_assert(as.SymbolDeclaration.symbol_ident->kind == MRV_ASTNodeKind_SymbolIdent);
-        lg_assert(as.SymbolDeclaration.type_ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(as.SymbolDeclaration.symbol_ident->kind == MRV_ASTNodeKind_SymbolIdent);
+        ak_assert(as.SymbolDeclaration.type_ident->kind == MRV_ASTNodeKind_OtherIdent);
 
         next(ctx, as.SymbolDeclaration.symbol_ident);
         next(ctx, as.SymbolDeclaration.type_ident);
@@ -2088,7 +2088,7 @@ mrv_sema_traverse_children(
 
     case MRV_ASTNodeKind_InvocationArgList:
         for (size_t i = 0; i < as.InvocationArgList.n_args; i++) {
-            lg_assert(
+            ak_assert(
                 as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_OtherIdent ||
                 as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_Unit ||
                 as.InvocationArgList.args[i]->kind == MRV_ASTNodeKind_SymbolIdent
@@ -2110,8 +2110,8 @@ mrv_sema_traverse_children(
     }
 
     case MRV_ASTNodeKind_TypeDeclaration: {
-        lg_assert(as.TypeDeclaration.ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(
+        ak_assert(as.TypeDeclaration.ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(
             as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_NonTrivialType ||
             as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_Error
 
@@ -2122,8 +2122,8 @@ mrv_sema_traverse_children(
     }
 
     case MRV_ASTNodeKind_NonTrivialType: {
-        lg_assert(as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
+        ak_assert(as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
         next(ctx, as.NonTrivialType.outermost_ident);
         next(ctx, as.NonTrivialType.invocation_arg_list);
         break;
@@ -2136,9 +2136,9 @@ mrv_sema_traverse_children(
 
         bool has_return = !mrv_ast_is_nil_node(ctx->ast, return_type);
 
-        lg_assert(op_ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
-        lg_assert(!has_return || return_type->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(op_ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
+        ak_assert(!has_return || return_type->kind == MRV_ASTNodeKind_OtherIdent);
 
         next(ctx, op_ident);
         next(ctx, arg_list);
@@ -2151,12 +2151,12 @@ mrv_sema_traverse_children(
         MRV_ASTNode *ident = as.DeclarationArg.ident;
         MRV_ASTNode *type = as.DeclarationArg.type;
 
-        lg_assert(
+        ak_assert(
             mrv_ast_is_nil_node(ctx->ast, ident) ||
             ident->kind == MRV_ASTNodeKind_OtherIdent ||
             ident->kind == MRV_ASTNodeKind_SymbolIdent
         );
-        lg_assert(
+        ak_assert(
             mrv_ast_is_nil_node(ctx->ast, type) ||
             type->kind == MRV_ASTNodeKind_OtherIdent ||
             type->kind == MRV_ASTNodeKind_HostTypeIdent
@@ -2172,8 +2172,8 @@ mrv_sema_traverse_children(
         MRV_ASTNode *ident = as.InvocationExpression.ident;
         MRV_ASTNode *arg_list = as.InvocationExpression.arg_list;
 
-        lg_assert(ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
+        ak_assert(ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
 
         next(ctx, ident);
         next(ctx, arg_list);
@@ -2185,8 +2185,8 @@ mrv_sema_traverse_children(
         MRV_ASTNode *arg_list = as.LambdaExpression.decl_arg_list;
         MRV_ASTNode *body_block = as.LambdaExpression.body_block;
 
-        lg_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
-        lg_assert(body_block->kind == MRV_ASTNodeKind_Block);
+        ak_assert(arg_list->kind == MRV_ASTNodeKind_DeclarationArgList);
+        ak_assert(body_block->kind == MRV_ASTNodeKind_Block);
 
         next(ctx, arg_list);
         next(ctx, body_block);
@@ -2196,14 +2196,14 @@ mrv_sema_traverse_children(
 
     case MRV_ASTNodeKind_DeclarationArgList:
         for (uint32_t i = 0; i < as.DeclarationArgList.n_args; i++) {
-            lg_assert(as.DeclarationArgList.args[i]->kind == MRV_ASTNodeKind_DeclarationArg);
+            ak_assert(as.DeclarationArgList.args[i]->kind == MRV_ASTNodeKind_DeclarationArg);
             next(ctx, as.DeclarationArgList.args[i]);
         }
         break;
         
     case MRV_ASTNodeKind_Block:
         for (uint32_t i = 0; i < as.Block.n_statements; i++) {
-            lg_assert(
+            ak_assert(
                 as.Block.statements[i]->kind == MRV_ASTNodeKind_AssignmentStatement ||
                 as.Block.statements[i]->kind == MRV_ASTNodeKind_ExpressionStatement
             );
@@ -2242,16 +2242,16 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     }
 
     case MRV_ASTNodeKind_HostTypeIdent: {
-        lg_str8 ident = mrv_span_to_str8(self->span, ctx->text);
+        ak_str8 ident = mrv_span_to_str8(self->span, ctx->text);
 
         size_t idx;
-        LG_StatusKind status = lg_table_ensure_str8(
+        AK_StatusKind status = ak_table_ensure_str8(
             &ctx->ldesc.table,
             ident,
             &idx,
             NULL
         );
-        lg_assert(status == LG_StatusKind_OK);
+        ak_assert(status == AK_StatusKind_OK);
 
         ctx->ldesc.entries[idx].name = ident;
         ctx->ldesc.entries[idx].kind = MRV_LanguageDescriptorEntryKind_Type;
@@ -2262,19 +2262,19 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     // we'll also take this opportunity to record the language name
     case MRV_ASTNodeKind_LanguageDeclaration: {
-        lg_str8 language_name = mrv_span_to_str8(as.LanguageDeclaration.ident->span, ctx->text);
+        ak_str8 language_name = mrv_span_to_str8(as.LanguageDeclaration.ident->span, ctx->text);
         if (
             ctx->ldesc.language_name.len != 0 && 
-            (lg_strcmp(language_name, ctx->ldesc.language_name) != 0)
+            (ak_strcmp(language_name, ctx->ldesc.language_name) != 0)
         ) {
-            mrv_report_error(&ctx->err, self->span, lg_str8_lit("conflicting langauge declarations found"));
+            mrv_report_error(&ctx->err, self->span, ak_str8_lit("conflicting langauge declarations found"));
         }
         ctx->ldesc.language_name = language_name;
         break;
     }
 
     case MRV_ASTNodeKind_TypeDeclaration: {
-        lg_str8 ident = mrv_span_to_str8(as.TypeDeclaration.ident->span, ctx->text);
+        ak_str8 ident = mrv_span_to_str8(as.TypeDeclaration.ident->span, ctx->text);
 
         MRV_TypeKind type_kind;
         if (as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_NonTrivialType) {
@@ -2285,7 +2285,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         size_t idx;
         bool found;
-        LG_StatusKind status = lg_table_ensure_str8(
+        AK_StatusKind status = ak_table_ensure_str8(
             &ctx->ldesc.table,
             ident,
             &idx,
@@ -2295,22 +2295,22 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             mrv_report_error(
                 &ctx->err,
                 self->span,
-                lg_str8_lit("type %{str} declared multiple times"),
+                ak_str8_lit("type %{str} declared multiple times"),
                 ident
             );
             break;
         }
-        lg_assert(status == LG_StatusKind_OK);
+        ak_assert(status == AK_StatusKind_OK);
 
         if (type_kind == MRV_TypeKind_Lambda) {
             MRV_ASTNode *outer_ident = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.outermost_ident;
             MRV_ASTNode *arg_list = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.invocation_arg_list;
 
             size_t n_args = arg_list->children_as.InvocationArgList.n_args;
-            lg_str8 outer_ident_str = mrv_span_to_str8(outer_ident->span, ctx->text);
+            ak_str8 outer_ident_str = mrv_span_to_str8(outer_ident->span, ctx->text);
 
-            if (lg_strcmp(outer_ident_str, lg_str8_lit("Lambda")) != 0) {
-                mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+            if (ak_strcmp(outer_ident_str, ak_str8_lit("Lambda")) != 0) {
+                mrv_report_error(&ctx->err, outer_ident->span, ak_str8_lit(
                     "non-trivial type %{str} aliases a(n) %{str}\n"
                     "non-trivial types must all be aliases to lambdas (for now)"
                 ), ident, outer_ident_str);
@@ -2318,7 +2318,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             }
 
             if (n_args > 3) {
-                mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                mrv_report_error(&ctx->err, outer_ident->span, ak_str8_lit(
                     "type %{str}, a lambda, has more than three parameters\n"
                     "lambdas may only have three: (return type, left arg, right arg)"
                 ), ident);
@@ -2327,24 +2327,24 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
             for (size_t i = 0; i < n_args; i++) {
                 MRV_ASTNode *arg_node = arg_list->children_as.InvocationArgList.args[i];
-                lg_str8 arg_str = mrv_span_to_str8(arg_node->span, ctx->text);
+                ak_str8 arg_str = mrv_span_to_str8(arg_node->span, ctx->text);
 
                 MRV_LanguageDescriptorRef ldesc_ref;
                 if (arg_node->kind == MRV_ASTNodeKind_Unit) {
                     ldesc_ref = (MRV_LanguageDescriptorRef){0};
                 } else if (arg_node->kind == MRV_ASTNodeKind_HostTypeIdent) {
-                    mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                    mrv_report_error(&ctx->err, outer_ident->span, ak_str8_lit(
                         "%{str} is a host type, a parameter of the type %{str}, which is a lambda\n"
                         "lambdas cannot take or return host types"
                     ), arg_str, ident);
                     return;
                 } else {
-                    lg_assert(arg_node->kind == MRV_ASTNodeKind_OtherIdent);
+                    ak_assert(arg_node->kind == MRV_ASTNodeKind_OtherIdent);
 
                     bool found;
-                    size_t arg_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_str, &found);
+                    size_t arg_ldesc_idx = ak_table_get_str8(&ctx->ldesc.table, arg_str, &found);
                     if (!found) {
-                        mrv_report_error(&ctx->err, outer_ident->span, lg_str8_lit(
+                        mrv_report_error(&ctx->err, outer_ident->span, ak_str8_lit(
                             "unknown type %{str} as parameter to type %{str}\n"
                             "lambdas cannot take or return host types"
                         ), arg_str, ident);
@@ -2361,7 +2361,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 } else if (i == 2) {
                     ctx->ldesc.entries[idx].as.type.right_arg_type = ldesc_ref;
                 } else {
-                    lg_unreachable();
+                    ak_unreachable();
                 }
             }
         }
@@ -2397,12 +2397,12 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         bool has_return = !mrv_ast_is_nil_node(ctx->ast, return_type);
 
-        lg_str8 op_ident = mrv_span_to_str8(op->span, ctx->text);
-        lg_str8 return_type_ident = has_return ?
+        ak_str8 op_ident = mrv_span_to_str8(op->span, ctx->text);
+        ak_str8 return_type_ident = has_return ?
             mrv_span_to_str8(return_type->span, ctx->text) :
-            lg_nil(lg_str8);
+            ak_nil(ak_str8);
 
-        lg_str8 arg_names[2] = {0};
+        ak_str8 arg_names[2] = {0};
         MRV_LanguageDescriptorRef ret_type = {0};
         MRV_LanguageDescriptorRef arg_types[2] = {0};
         {
@@ -2411,7 +2411,7 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 mrv_report_error(
                     &ctx->err,
                     arg_list->span,
-                    lg_str8_lit(
+                    ak_str8_lit(
                         "operator %{str} declared with %{i64} arguments\n"
                         "operators may not have more than two arguments"
                     ),
@@ -2423,18 +2423,18 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             bool found;
             
             for (size_t i = 0; i < n_args; i++) {
-                lg_assert(i < 2);
+                ak_assert(i < 2);
                 MRV_Span name_ident_span = arg_list->children_as.DeclarationArgList.args[i]->children_as.DeclarationArg.ident->span;
-                lg_str8 name_ident = mrv_span_to_str8(name_ident_span, ctx->text);
+                ak_str8 name_ident = mrv_span_to_str8(name_ident_span, ctx->text);
                 MRV_Span type_ident_span = arg_list->children_as.DeclarationArgList.args[i]->children_as.DeclarationArg.type->span;
-                lg_str8 type_ident = mrv_span_to_str8(type_ident_span, ctx->text);
+                ak_str8 type_ident = mrv_span_to_str8(type_ident_span, ctx->text);
 
-                size_t idx = lg_table_get_str8(&ctx->ldesc.table, type_ident, &found);
+                size_t idx = ak_table_get_str8(&ctx->ldesc.table, type_ident, &found);
                 if (!found) {
                     mrv_report_error(
                         &ctx->err,
                         type_ident_span,
-                        lg_str8_lit("unknown type in args of operator declaration: %{str}"),
+                        ak_str8_lit("unknown type in args of operator declaration: %{str}"),
                         type_ident
                     );
                     break;
@@ -2443,7 +2443,7 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     mrv_report_error(
                         &ctx->err,
                         type_ident_span,
-                        lg_str8_lit("type %{str} in args of operator declaration is not a type at all"),
+                        ak_str8_lit("type %{str} in args of operator declaration is not a type at all"),
                         type_ident
                     );
                     break;
@@ -2454,12 +2454,12 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             }
 
             if (has_return) {
-                size_t idx = lg_table_get_str8(&ctx->ldesc.table, return_type_ident, &found);
+                size_t idx = ak_table_get_str8(&ctx->ldesc.table, return_type_ident, &found);
                 if (!found) {
                     mrv_report_error(
                         &ctx->err,
                         return_type->span,
-                        lg_str8_lit("unknown type in return type of operator declaration: %{str}"),
+                        ak_str8_lit("unknown type in return type of operator declaration: %{str}"),
                         return_type_ident
                     );
                     break;
@@ -2468,7 +2468,7 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                     mrv_report_error(
                         &ctx->err,
                         return_type->span,
-                        lg_str8_lit("type %{str} in args of operator declaration is not a type at all"),
+                        ak_str8_lit("type %{str} in args of operator declaration is not a type at all"),
                         return_type_ident
                     );
                     break;
@@ -2481,13 +2481,13 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         size_t op_idx;
         {
             bool found;
-            LG_StatusKind status = lg_table_ensure_str8(&ctx->ldesc.table, op_ident, &op_idx, &found);
-            lg_assert(status == LG_StatusKind_OK);
+            AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, op_ident, &op_idx, &found);
+            ak_assert(status == AK_StatusKind_OK);
             if (found) {
                 mrv_report_error(
                     &ctx->err,
                     self->span,
-                    lg_str8_lit("multiple declarations found for operator %{str}"),
+                    ak_str8_lit("multiple declarations found for operator %{str}"),
                     op_ident
                 );
                 break;
@@ -2548,25 +2548,25 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
 
     mrv_match_ast_node(self->kind) {
     case MRV_ASTNodeKind_InvocationExpression: {
-        lg_assert(as.InvocationExpression.ident->kind == MRV_ASTNodeKind_OtherIdent);
-        lg_assert(as.InvocationExpression.arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
+        ak_assert(as.InvocationExpression.ident->kind == MRV_ASTNodeKind_OtherIdent);
+        ak_assert(as.InvocationExpression.arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
 
         size_t n_args = as.InvocationExpression.arg_list->children_as.InvocationArgList.n_args;
         MRV_ASTNode *op_ident = as.InvocationExpression.ident;
         MRV_ASTNode *arg_list = as.InvocationExpression.arg_list;
 
-        lg_assert(op_ident != NULL);
-        lg_str8 op_ident_str = mrv_span_to_str8(op_ident->span, ctx->text);
+        ak_assert(op_ident != NULL);
+        ak_str8 op_ident_str = mrv_span_to_str8(op_ident->span, ctx->text);
 
         size_t operator_ldesc_idx;
         {
             bool found;
-            operator_ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, op_ident_str, &found);
+            operator_ldesc_idx = ak_table_get_str8(&ctx->ldesc.table, op_ident_str, &found);
             if (!found) {
                 mrv_report_error(
                     &ctx->err,
                     op_ident->span,
-                    lg_str8_lit("attempted to invoke unknown operator %{str}"),
+                    ak_str8_lit("attempted to invoke unknown operator %{str}"),
                     op_ident_str
                 );
                 return;
@@ -2575,7 +2575,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
                 mrv_report_error(
                     &ctx->err,
                     op_ident->span,
-                    lg_str8_lit("attempted to invoke %{str}, which is not an operator"),
+                    ak_str8_lit("attempted to invoke %{str}, which is not an operator"),
                     op_ident_str
                 );
                 return;
@@ -2586,7 +2586,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             mrv_report_error(
                 &ctx->err,
                 self->span,
-                lg_str8_lit(
+                ak_str8_lit(
                     "operator %{str} passed more than two arguments\n"
                     "operators may have a maximum of two arguments"
                 ), op_ident_str
@@ -2598,7 +2598,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
         MRV_Span left_arg_span = {0};
         if (n_args > 0) {
             left_arg_span = arg_list->children_as.InvocationArgList.args[0]->span;
-            lg_str8 name_str = mrv_span_to_str8(left_arg_span, ctx->text);
+            ak_str8 name_str = mrv_span_to_str8(left_arg_span, ctx->text);
 
             bool found;
             left_arg_symbol = mrv_nrstack_find_name(&state->nrstack, name_str, &found);
@@ -2606,7 +2606,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
                 mrv_report_error(
                     &ctx->err,
                     left_arg_span,
-                    lg_str8_lit("unknown identifier %{str} as first argument to invocation of operator %{str}"),
+                    ak_str8_lit("unknown identifier %{str} as first argument to invocation of operator %{str}"),
                     name_str, op_ident_str
                 );
                 return;
@@ -2617,7 +2617,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
         MRV_Span right_arg_span = {0};
         if (n_args > 1) {
             right_arg_span = arg_list->children_as.InvocationArgList.args[1]->span;
-            lg_str8 name_str = mrv_span_to_str8(right_arg_span, ctx->text);
+            ak_str8 name_str = mrv_span_to_str8(right_arg_span, ctx->text);
 
             bool found;
             right_arg_symbol = mrv_nrstack_find_name(&state->nrstack, name_str, &found);
@@ -2625,14 +2625,14 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
                 mrv_report_error(
                     &ctx->err,
                     right_arg_span,
-                    lg_str8_lit("unknown identifier %{str} as second argument to invocation of operator %{str}"),
+                    ak_str8_lit("unknown identifier %{str} as second argument to invocation of operator %{str}"),
                     name_str, op_ident_str
                 );
                 return;
             }
         }
 
-        lg_assert(state->istream != NULL);
+        ak_assert(state->istream != NULL);
         mrv_istream_append(state->istream, (MRV_Inst){
             .kind = MRV_InstKind_Invocation,
             .as.invocation = {
@@ -2663,8 +2663,8 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             MRV_ASTNode *ident = arg->children_as.DeclarationArg.ident;
             MRV_ASTNode *type = arg->children_as.DeclarationArg.type;
 
-            lg_str8 ident_str = mrv_span_to_str8(ident->span, ctx->text);
-            lg_str8 type_str = mrv_span_to_str8(type->span, ctx->text);
+            ak_str8 ident_str = mrv_span_to_str8(ident->span, ctx->text);
+            ak_str8 type_str = mrv_span_to_str8(type->span, ctx->text);
 
             MRV_Symbol symbol;
             if (i == 0) {
@@ -2677,13 +2677,13 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             {
                 bool found;
                 size_t type_ldesc_idx;
-                LG_StatusKind status = lg_table_ensure_str8(&ctx->ldesc.table, type_str, &type_ldesc_idx, &found);
-                lg_assert(status == LG_StatusKind_OK);
+                AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, type_str, &type_ldesc_idx, &found);
+                ak_assert(status == AK_StatusKind_OK);
                 if (!found) {
                     mrv_report_error(
                         &ctx->err,
                         type->span,
-                        lg_str8_lit("unknown type %{str} found in assignment to lambda %{str}"),
+                        ak_str8_lit("unknown type %{str} found in assignment to lambda %{str}"),
                         type_str, ident_str 
                     );
                     return;
@@ -2717,7 +2717,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
     }
 
     default:
-        lg_unreachable();
+        ak_unreachable();
         break;
     }
 }
@@ -2733,7 +2733,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         break;
 
     case MRV_ASTNodeKind_ExpressionStatement:
-        mrv_sema_append_inst_for_expr(ctx, as.ExpressionStatement.expression, lg_nil(MRV_Symbol));
+        mrv_sema_append_inst_for_expr(ctx, as.ExpressionStatement.expression, ak_nil(MRV_Symbol));
         break;
 
     case MRV_ASTNodeKind_AssignmentStatement: {
@@ -2741,8 +2741,8 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         MRV_ASTNode *symbol_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.symbol_ident;
         MRV_ASTNode *symbol_type_ident = as.AssignmentStatement.symbol_decl->children_as.SymbolDeclaration.type_ident;
-        lg_str8 symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
-        lg_str8 symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
+        ak_str8 symbol_ident_str = mrv_span_to_str8(symbol_ident->span, ctx->text);
+        ak_str8 symbol_type_ident_str = mrv_span_to_str8(symbol_type_ident->span, ctx->text);
 
         // we're not actually checking that the type is what it should be here, just that it exists at all so
         // we can get this reference
@@ -2750,13 +2750,13 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         {
             bool found;
             size_t type_ldesc_idx;
-            LG_StatusKind status = lg_table_ensure_str8(&ctx->ldesc.table, symbol_type_ident_str, &type_ldesc_idx, &found);
-            lg_assert(status == LG_StatusKind_OK);
+            AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, symbol_type_ident_str, &type_ldesc_idx, &found);
+            ak_assert(status == AK_StatusKind_OK);
             if (!found) {
                 mrv_report_error(
                     &ctx->err,
                     symbol_type_ident->span,
-                    lg_str8_lit("unknown type %{str} found in assignment to symbol %{str}"),
+                    ak_str8_lit("unknown type %{str} found in assignment to symbol %{str}"),
                     symbol_type_ident_str, symbol_ident_str
                 );
                 return;
@@ -2766,7 +2766,7 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         }
 
         MRV_Symbol new_symbol = {0};
-        lg_assert(state->nrstack.nodes != NULL);
+        ak_assert(state->nrstack.nodes != NULL);
         new_symbol = mrv_nrstack_push(&state->nrstack, symbol_ident_str);
 
         state->istream->symtab[new_symbol.id].type = type_ref;
@@ -2789,9 +2789,9 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         return;
     }
 
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
 
-    LG_StatusKind status;
+    AK_StatusKind status;
     MRV_ASTNodeChildren as = self->children_as;
 
 
@@ -2799,18 +2799,18 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     // ~~ read a few things from the ast ~~ 
 
     MRV_Span ident_span = as.CombinatorDeclaration.ident->span;
-    lg_str8 ident = mrv_span_to_str8(ident_span, ctx->text);
+    ak_str8 ident = mrv_span_to_str8(ident_span, ctx->text);
 
     size_t ldesc_idx;
     {
         bool found;
-        status = lg_table_ensure_str8(&ctx->ldesc.table, ident, &ldesc_idx, &found);
-        lg_assert(status == LG_StatusKind_OK);
+        status = ak_table_ensure_str8(&ctx->ldesc.table, ident, &ldesc_idx, &found);
+        ak_assert(status == AK_StatusKind_OK);
         if (found) {
             mrv_report_error(
                 &ctx->err,
                 self->span,
-                lg_str8_lit("found multiple declarations for combinator %{str}"),
+                ak_str8_lit("found multiple declarations for combinator %{str}"),
                 ident
             );
             goto out;
@@ -2826,7 +2826,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         mrv_report_error(
             &ctx->err,
             self->span,
-            lg_str8_lit("combinator %{str} has no arguments\ncombinators must have at least one argument"),
+            ak_str8_lit("combinator %{str} has no arguments\ncombinators must have at least one argument"),
             ident
         );
         goto out;
@@ -2838,7 +2838,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     MRV_SemaPhaseState *const state = &ctx->phase_state;
 
-    lg_memzero(state, sizeof(MRV_SemaPhaseState));
+    ak_memzero(state, sizeof(MRV_SemaPhaseState));
     mrv_sema_combinator_do_counting(ctx, self);
 
     mrv_istream_init(
@@ -2867,10 +2867,10 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         for (size_t i = 0; i < n_args; i++) {
             MRV_Span arg_ident_span = arg_nodes[i]->children_as.DeclarationArg.ident->span;
-            lg_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
+            ak_str8 arg_ident = mrv_span_to_str8(arg_ident_span, ctx->text);
 
             MRV_Span arg_type_span = arg_nodes[i]->children_as.DeclarationArg.type->span;
-            lg_str8 arg_type = mrv_span_to_str8(arg_type_span, ctx->text);
+            ak_str8 arg_type = mrv_span_to_str8(arg_type_span, ctx->text);
 
             bool found;
 
@@ -2879,7 +2879,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 mrv_report_error(
                     &ctx->err,
                     arg_ident_span,
-                    lg_str8_lit("multiple arguments found for combinator %{str} with identifier %{str}"),
+                    ak_str8_lit("multiple arguments found for combinator %{str} with identifier %{str}"),
                     ident, arg_ident
                 );
                 goto out;
@@ -2887,12 +2887,12 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
             MRV_LanguageDescriptorRef type_ref;
             {
-                size_t ldesc_idx = lg_table_get_str8(&ctx->ldesc.table, arg_type, &found);
+                size_t ldesc_idx = ak_table_get_str8(&ctx->ldesc.table, arg_type, &found);
                 if (!found) {
                     mrv_report_error(
                         &ctx->err,
                         self->span,
-                        lg_str8_lit(
+                        ak_str8_lit(
                             "argument %{str} in combinator %{str} has unknown type %{str}\n"
                         ),
                         arg_ident, ident, arg_type
@@ -2922,13 +2922,13 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         }
     }
 
-    lg_assert(as.CombinatorDeclaration.body->kind == MRV_ASTNodeKind_Block);
+    ak_assert(as.CombinatorDeclaration.body->kind == MRV_ASTNodeKind_Block);
 
     if (as.CombinatorDeclaration.body->children_as.Block.n_statements == 0) {
         mrv_report_error(
             &ctx->err,
             self->span,
-            lg_str8_lit(
+            ak_str8_lit(
                 "found combinator %{str} with empty body\n"
                 "combinators may not have empty bodies"
             ),
@@ -2940,17 +2940,17 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     mrv_sema_block_to_inst_stream_r(ctx, self);
 
 out:
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
     return;
 }
 
 void
 mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc.table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc.table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry combinator_entry = ctx->ldesc.entries[idx];
         if (combinator_entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
             continue;
@@ -2966,35 +2966,35 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
 
             case MRV_InstKind_Invocation: {
                 const MRV_LanguageDescriptorEntry *const op_entry = &ctx->ldesc.entries[mrv_ldesc_ref_get_idx(istream->insts[i].as.invocation.operator)];
-                lg_assert(op_entry->kind == MRV_LanguageDescriptorEntryKind_Operator);
+                ak_assert(op_entry->kind == MRV_LanguageDescriptorEntryKind_Operator);
 
                 MRV_Symbol left_arg = istream->insts[i].as.invocation.left_arg;
                 MRV_LanguageDescriptorRef got_left_arg_type = istream->symtab[left_arg.id].type;
                 MRV_LanguageDescriptorRef want_left_arg_type = op_entry->as.operator.left_arg_type;
                 if (left_arg.id != 0) {
                     if (!mrv_ldesc_ref_is_valid(want_left_arg_type)) {
-                        lg_str8 op_name = op_entry->name;
+                        ak_str8 op_name = op_entry->name;
                         MRV_Span span = istream->symtab[left_arg.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "passed left argument %{str} to operator %{str} which does not take one"
                             ), ident, op_name
                         );
                         goto again;
                     }
                     if (!mrv_ldesc_ref_eq(got_left_arg_type, want_left_arg_type)) {
-                        lg_str8 op_name = op_entry->name;
-                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_left_arg_type);
-                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_left_arg_type);
+                        ak_str8 op_name = op_entry->name;
+                        ak_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_left_arg_type);
+                        ak_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_left_arg_type);
                         MRV_Span span = istream->symtab[left_arg.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "left arg %{str} in invocation or operator %{str} is of type %{str}; "
                                 "wanted %{str}"
                             ), ident, op_name, got_type, want_type
@@ -3008,28 +3008,28 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 MRV_LanguageDescriptorRef want_right_arg_type = op_entry->as.operator.right_arg_type;
                 if (right_arg.id != 0) {
                     if (!mrv_ldesc_ref_is_valid(want_right_arg_type)) {
-                        lg_str8 op_name = op_entry->name;
+                        ak_str8 op_name = op_entry->name;
                         MRV_Span span = istream->symtab[right_arg.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "passed right argument %{str} to operator %{str} which does not take one"
                             ), ident, op_name
                         );
                         goto again;
                     }
                     if (!mrv_ldesc_ref_eq(got_right_arg_type, want_right_arg_type)) {
-                        lg_str8 op_name = op_entry->name;
-                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_right_arg_type);
-                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_right_arg_type);
+                        ak_str8 op_name = op_entry->name;
+                        ak_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_right_arg_type);
+                        ak_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_right_arg_type);
                         MRV_Span span = istream->symtab[right_arg.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "right arg %{str} in invocation of operator %{str} is of type %{str}; "
                                 "wanted %{str}"
                             ), ident, op_name, got_type, want_type
@@ -3043,28 +3043,28 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 MRV_LanguageDescriptorRef want_return_val_type = op_entry->as.operator.return_type;
                 if (return_val.id != 0) {
                     if (!mrv_ldesc_ref_is_valid(want_return_val_type)) {
-                        lg_str8 op_name = op_entry->name;
+                        ak_str8 op_name = op_entry->name;
                         MRV_Span span = istream->symtab[return_val.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "assigned a value %{str} to to the result of the operator %{str}, which does not return a value"
                             ), ident, op_name
                         );
                         goto again;
                     }
                     if (!mrv_ldesc_ref_eq(got_return_val_type, want_return_val_type)) {
-                        lg_str8 op_name = op_entry->name;
-                        lg_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_return_val_type);
-                        lg_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_return_val_type);
+                        ak_str8 op_name = op_entry->name;
+                        ak_str8 got_type = mrv_ldesc_get_name(&ctx->ldesc, got_return_val_type);
+                        ak_str8 want_type = mrv_ldesc_get_name(&ctx->ldesc, want_return_val_type);
                         MRV_Span span = istream->symtab[return_val.id].ident_span;
-                        lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                        ak_str8 ident = mrv_span_to_str8(span, ctx->text);
                         mrv_report_error(
                             &ctx->err,
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "assigned %{str} to return value of invocation of operator %{str}, which is of type %{str}; "
                                 "%{str} actually returns %{str}"
                             ), ident, op_name, got_type, op_name, want_type
@@ -3083,7 +3083,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
 
                 if (mrv_ldesc_ref_is_valid(type_entry->as.type.left_arg_type)) {
                     MRV_Span span = istream->symtab[new_symbol.id].ident_span;
-                    lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                    ak_str8 ident = mrv_span_to_str8(span, ctx->text);
 
                     if (
                         istream->len < i + 2 ||
@@ -3092,14 +3092,14 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                         mrv_report_error(
                             &ctx->err, 
                             span,
-                            lg_str8_lit("missing the left arg in declaration of lambda %{str} of type %{str}"),
+                            ak_str8_lit("missing the left arg in declaration of lambda %{str} of type %{str}"),
                             ident, type_entry->name
                         );
                         goto again;
                     }
 
                     MRV_Symbol arg_sym = istream->insts[i + 1].as.arg.sym;
-                    lg_assert(arg_sym.id != 0);
+                    ak_assert(arg_sym.id != 0);
 
                     MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.left_arg_type;
                     MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
@@ -3108,7 +3108,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                         mrv_report_error(
                             &ctx->err, 
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "declared lambda %{str} of type %{str} with left arg of type %{str}\n"
                                 "the left arg of %{str} is actually of type %{str}"
                             ),
@@ -3120,7 +3120,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 }
                 if (mrv_ldesc_ref_is_valid(type_entry->as.type.right_arg_type)) {
                     MRV_Span span = istream->symtab[new_symbol.id].ident_span;
-                    lg_str8 ident = mrv_span_to_str8(span, ctx->text);
+                    ak_str8 ident = mrv_span_to_str8(span, ctx->text);
 
                     if (
                         istream->len < i + 3 ||
@@ -3129,14 +3129,14 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                         mrv_report_error(
                             &ctx->err, 
                             span,
-                            lg_str8_lit("missing the right arg in declaration of lambda %{str} of type %{str}"),
+                            ak_str8_lit("missing the right arg in declaration of lambda %{str} of type %{str}"),
                             ident, type_entry->name
                         );
                         goto again;
                     }
 
                     MRV_Symbol arg_sym = istream->insts[i + 2].as.arg.sym;
-                    lg_assert(arg_sym.id != 0);
+                    ak_assert(arg_sym.id != 0);
 
                     MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.right_arg_type;
                     MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
@@ -3145,7 +3145,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                         mrv_report_error(
                             &ctx->err, 
                             span,
-                            lg_str8_lit(
+                            ak_str8_lit(
                                 "declared lambda %{str} of type %{str} with right arg of type %{str}\n"
                                 "the right arg of %{str} is actually of type %{str}"
                             ),
@@ -3157,7 +3157,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 }
 
                 if (mrv_ldesc_ref_is_valid(type_entry->as.type.return_type)) {
-                    lg_unreachable("TODO: there may not even be a need for this yet");
+                    ak_unreachable("TODO: there may not even be a need for this yet");
                 }
 
                 break;
@@ -3170,16 +3170,16 @@ again:;
 
 void
 mrv_analyze(
-    LG_Allocator artifact_allocator,
-    LG_Arena *scratch_allocator,
+    AK_Allocator artifact_allocator,
+    AK_Arena *scratch_allocator,
     MRV_AST *ast,
-    lg_str8 text,
-    LG_Writer *err_writer,
+    ak_str8 text,
+    AK_Writer *err_writer,
     MRV_LanguageDescriptor *out_ldesc
 ) {
-    lg_assert(out_ldesc != NULL);
+    ak_assert(out_ldesc != NULL);
 
-    LG_Scope scope = lg_push_scope(scratch_allocator);
+    AK_Scope scope = ak_push_scope(scratch_allocator);
     
     MRV_SemaContext ctx = {
         .ast = ast,
@@ -3188,14 +3188,14 @@ mrv_analyze(
         .err.writer = err_writer,
     };
     // TODO: remove magic number capacity
-    LG_StatusKind status = LG_StatusKind_OK;
+    AK_StatusKind status = AK_StatusKind_OK;
 
-    lg_arena_init(&ctx.ldesc.arena, artifact_allocator);
-    status = lg_table_init(&ctx.ldesc.table, &ctx.ldesc.arena, 1024);
-    lg_assert(status == LG_StatusKind_OK);
+    ak_arena_init(&ctx.ldesc.arena, artifact_allocator);
+    status = ak_table_init(&ctx.ldesc.table, &ctx.ldesc.arena, 1024);
+    ak_assert(status == AK_StatusKind_OK);
 
-    ctx.ldesc.entries = lg_arena_alloc_array(&ctx.ldesc.arena, MRV_LanguageDescriptorEntry, 1024);
-    lg_assert(ctx.ldesc.entries != NULL);
+    ctx.ldesc.entries = ak_arena_alloc_array(&ctx.ldesc.arena, MRV_LanguageDescriptorEntry, 1024);
+    ak_assert(ctx.ldesc.entries != NULL);
 
     mrv_sema_record_type_decls_r(&ctx, ctx.ast->root);
     mrv_sema_record_op_decls_r(&ctx, ctx.ast->root);
@@ -3203,13 +3203,13 @@ mrv_analyze(
     mrv_sema_typecheck_istreams(&ctx);
     
     *out_ldesc = ctx.ldesc;
-    lg_pop_scope(scratch_allocator, scope);
+    ak_pop_scope(scratch_allocator, scope);
 }
 
 void
 mrv_ldesc_destroy(MRV_LanguageDescriptor *ldesc) {
-    lg_arena_free_all(&ldesc->arena);
-    lg_memzero(ldesc, sizeof(MRV_LanguageDescriptor));
+    ak_arena_free_all(&ldesc->arena);
+    ak_memzero(ldesc, sizeof(MRV_LanguageDescriptor));
 }
 
 
@@ -3222,17 +3222,17 @@ mrv_ldesc_destroy(MRV_LanguageDescriptor *ldesc) {
 
 typedef struct
 MRV_TmplFieldTable {
-    lg_str8 key;
+    ak_str8 key;
     union {
-        lg_str8 str;
-        LG_StringList strlist;
+        ak_str8 str;
+        AK_StringList strlist;
     } value_as;
 } MRV_TmplFieldTable;
 
 void 
 mrv_write_tmpl(
-    LG_Writer *writer,
-    lg_str8 text,
+    AK_Writer *writer,
+    ak_str8 text,
     MRV_TmplFieldTable *fields,
     size_t n_entries
 ) {
@@ -3250,7 +3250,7 @@ mrv_write_tmpl(
                 (scan + 1 < text.len && text.p[scan + 1] != '}')
             ) { scan++; }
 
-            lg_str8 found_key = (lg_str8){ .len = scan - i, .p = text.p + i + 1 };
+            ak_str8 found_key = (ak_str8){ .len = scan - i, .p = text.p + i + 1 };
 
             if (
                 found_key.len > 2 &&
@@ -3258,36 +3258,36 @@ mrv_write_tmpl(
                 found_key.p[1] == ':'
             ) {
                 bool found = false;
-                lg_str8 found_key_without_prefix = (lg_str8){ .len = found_key.len - 2, .p = found_key.p + 2 };
-                LG_StringList found_value = {0};
+                ak_str8 found_key_without_prefix = (ak_str8){ .len = found_key.len - 2, .p = found_key.p + 2 };
+                AK_StringList found_value = {0};
                 for (size_t i_table = 0; i_table < n_entries; i_table++) {
-                    if (lg_strcmp(found_key_without_prefix, fields[i_table].key) == 0) {
+                    if (ak_strcmp(found_key_without_prefix, fields[i_table].key) == 0) {
                         found = true;
                         found_value = fields[i_table].value_as.strlist;
                         break;
                     }
                 }
 
-                lg_assert(found);
-                lg_strlist_write(&found_value, writer);
+                ak_assert(found);
+                ak_strlist_write(&found_value, writer);
             } else {
                 bool found = false;
-                lg_str8 found_value = {0};
+                ak_str8 found_value = {0};
                 for (size_t i_table = 0; i_table < n_entries; i_table++) {
-                    if (lg_strcmp(found_key, fields[i_table].key) == 0) {
+                    if (ak_strcmp(found_key, fields[i_table].key) == 0) {
                         found = true;
                         found_value = fields[i_table].value_as.str;
                         break;
                     }
                 }
 
-                lg_assert(found);
-                lg_write(writer, found_value);
+                ak_assert(found);
+                ak_write(writer, found_value);
             }
 
             i = scan + 2;
         } else {
-            lg_write(writer, ((lg_str8){ .len = 1, .p = text.p + i }));
+            ak_write(writer, ((ak_str8){ .len = 1, .p = text.p + i }));
         }
     }
 }
@@ -3302,65 +3302,65 @@ mrv_write_tmpl(
 
 typedef struct
 MRV_SourcegenContext {
-    LG_Arena                *scratch;
-    LG_Writer               *header_file_writer;
-    LG_Writer               *source_file_writer;
+    AK_Arena                *scratch;
+    AK_Writer               *header_file_writer;
+    AK_Writer               *source_file_writer;
     MRV_LanguageDescriptor  *ldesc;
-    lg_str8                  type_ident_prefix;
-    lg_str8                  text;
+    ak_str8                  type_ident_prefix;
+    ak_str8                  text;
 
     struct {
-        lg_str8 lang_capitalized;
-        lg_str8 lang_snake_case;
+        ak_str8 lang_capitalized;
+        ak_str8 lang_snake_case;
     } common_strings;
 } MRV_SourcegenContext;
 
 void
 mrv_strlist_newline_indent(
-    LG_StringList *strlist,
-    LG_Arena *arena,
+    AK_StringList *strlist,
+    AK_Arena *arena,
     uint32_t level
 ) {
     for (uint32_t i = 0; i < level; i++) {
         if (i == 0) {
-            lg_strlist_append(strlist, arena, lg_str8_lit("\n"));
+            ak_strlist_append(strlist, arena, ak_str8_lit("\n"));
         }
-        lg_strlist_append(strlist, arena, lg_str8_lit("     "));
+        ak_strlist_append(strlist, arena, ak_str8_lit("     "));
     }
 }
 
-lg_str8
-mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, lg_str8 name) {
-    LG_StatusKind status = LG_StatusKind_OK;
+ak_str8
+mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, ak_str8 name) {
+    AK_StatusKind status = AK_StatusKind_OK;
 
     bool found;
-    size_t idx = lg_table_get_str8(&ctx->ldesc->table, name, &found);
-    lg_assert(found);
+    size_t idx = ak_table_get_str8(&ctx->ldesc->table, name, &found);
+    ak_assert(found);
 
     MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
 
-    lg_assert(entry.kind == MRV_LanguageDescriptorEntryKind_Type);
+    ak_assert(entry.kind == MRV_LanguageDescriptorEntryKind_Type);
 
-    lg_str8 cat = {0};
+    ak_str8 cat = {0};
     if (
         entry.as.type.type_kind == MRV_TypeKind_Nominal || 
         entry.as.type.type_kind == MRV_TypeKind_Lambda
     ) {
-        status = lg_strcat(ctx->scratch, (lg_str8[]){
-            lg_str8_lit("LG_"),
+        status = ak_strcat(ctx->scratch, (ak_str8[]){
+            ak_str8_lit("AK_"),
             ctx->ldesc->language_name,
-            lg_str8_lit("Symbol_"),
+            ak_str8_lit("Symbol_"),
             entry.name,
         }, 4, &cat);
-        lg_assert(status == LG_StatusKind_OK);
+        ak_assert(status == AK_StatusKind_OK);
     } else if (entry.as.type.type_kind == MRV_TypeKind_Host) {
-        status = lg_strcat(ctx->scratch, (lg_str8[]){
+        status = ak_strcat(ctx->scratch, (ak_str8[]){
             entry.name,
-            lg_str8_lit(" *"),
+            ak_str8_lit(" *"),
         }, 2, &cat);
-        lg_assert(status == LG_StatusKind_OK);
+        ak_assert(status == AK_StatusKind_OK);
     } else {
-        lg_unreachable();
+        ak_unreachable();
     }
 
     return cat;
@@ -3401,11 +3401,11 @@ mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, lg_str8 name) {
     MRV_X(sizeof)
 
 const struct {
-    lg_str8 str;
+    ak_str8 str;
     uint32_t hash;
 }
 MRV_C_KEYWORDS[] = {
-#   define MRV_X(kw) { .str = lg_str8_lit(#kw), .hash = lg_hash_lit_16(#kw) },
+#   define MRV_X(kw) { .str = ak_str8_lit(#kw), .hash = ak_hash_lit_16(#kw) },
     MRV_DEF_C_KEYWORDS
 #   undef MRV_X
 };
@@ -3415,34 +3415,34 @@ MRV_N_C_KEYWORDS = sizeof(MRV_C_KEYWORDS) / sizeof(MRV_C_KEYWORDS[0]);
 /// allocates a "safe" version of some (currently pascal case) identifier that follows two rules:
 /// 1) it is snake case
 /// 2) avoids C language keywords
-lg_str8
-mrv_sg_pascal_to_snake_escaped(LG_Arena *arena, lg_str8 original) {
-    lg_assert(original.len != 0);
+ak_str8
+mrv_sg_pascal_to_snake_escaped(AK_Arena *arena, ak_str8 original) {
+    ak_assert(original.len != 0);
 
-    LG_StatusKind status;
+    AK_StatusKind status;
 
-    lg_str8 name_snake_case;
-    status = lg_str8_pascal_to_snake_case(original, arena, &name_snake_case);
-    lg_assert(status == LG_StatusKind_OK);
+    ak_str8 name_snake_case;
+    status = ak_str8_pascal_to_snake_case(original, arena, &name_snake_case);
+    ak_assert(status == AK_StatusKind_OK);
 
     if (name_snake_case.len > 16) {
         return name_snake_case;
     }
 
-    uint64_t this_hash = lg_hash_16(name_snake_case.p, name_snake_case.len);
+    uint64_t this_hash = ak_hash_16(name_snake_case.p, name_snake_case.len);
     for (uint32_t i = 0; i < MRV_N_C_KEYWORDS; i++) {
         uint64_t reserved_hash = MRV_C_KEYWORDS[i].hash;
         if (
             this_hash != reserved_hash ||
-            lg_strcmp(MRV_C_KEYWORDS[i].str, name_snake_case) != 0
+            ak_strcmp(MRV_C_KEYWORDS[i].str, name_snake_case) != 0
         ) {
             continue;
         }
 
         // waste memory who cares
-        lg_str8 cat;
-        status = lg_strcat(arena, (lg_str8[]){name_snake_case, lg_str8_lit("_")}, 2, &cat);
-        lg_assert(status == LG_StatusKind_OK);
+        ak_str8 cat;
+        status = ak_strcat(arena, (ak_str8[]){name_snake_case, ak_str8_lit("_")}, 2, &cat);
+        ak_assert(status == AK_StatusKind_OK);
 
         return cat;
     }
@@ -3452,16 +3452,16 @@ mrv_sg_pascal_to_snake_escaped(LG_Arena *arena, lg_str8 original) {
 
 void
 mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
-    lg_printf(ctx->header_file_writer, lg_str8_lit(
-        "\ntypedef uint8_t\nLG_%{str}Type;"
-        "\nenum\nLG_%{str}Type {"
+    ak_printf(ctx->header_file_writer, ak_str8_lit(
+        "\ntypedef uint8_t\nAK_%{str}Type;"
+        "\nenum\nAK_%{str}Type {"
     ), ctx->ldesc->language_name, ctx->ldesc->language_name);
 
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (
             entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
@@ -3470,55 +3470,55 @@ mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
             continue;
         }
 
-        lg_printf(
+        ak_printf(
             ctx->header_file_writer,
-            lg_str8_lit("\n    LG_%{str}Type_%{str},"),
+            ak_str8_lit("\n    AK_%{str}Type_%{str},"),
             ctx->ldesc->language_name, entry.name
         );
     }
 
-    lg_write(ctx->header_file_writer, lg_str8_lit("\n};\n"));
+    ak_write(ctx->header_file_writer, ak_str8_lit("\n};\n"));
 }
 
 void
 mrv_sg_opcode_enum(MRV_SourcegenContext *ctx) {
-    lg_printf(ctx->header_file_writer, lg_str8_lit(
-        "\ntypedef uint8_t\nLG_%{str}Opcode;"
-        "\nenum\nLG_%{str}Opcode {"
-        "\n    LG_%{str}Opcode_NOP,"
+    ak_printf(ctx->header_file_writer, ak_str8_lit(
+        "\ntypedef uint8_t\nAK_%{str}Opcode;"
+        "\nenum\nAK_%{str}Opcode {"
+        "\n    AK_%{str}Opcode_NOP,"
     ), 
         ctx->ldesc->language_name,
         ctx->ldesc->language_name,
         ctx->ldesc->language_name
     );
 
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
-            lg_printf(
+            ak_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("\n    LG_%{str}Opcode_%{str},"),
+                ak_str8_lit("\n    AK_%{str}Opcode_%{str},"),
                 ctx->ldesc->language_name, entry.name
             );
         }
     }
 
-    lg_write(ctx->header_file_writer, lg_str8_lit("\n};\n"));
+    ak_write(ctx->header_file_writer, ak_str8_lit("\n};\n"));
 }
 
 void
 mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
-    LG_StringList union_body = {0};
+    AK_StringList union_body = {0};
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (
             entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
@@ -3527,115 +3527,115 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
             continue;
         }
 
-        lg_str8 symbol_type = mrv_sg_fmt_symbol_type(ctx, entry.name);
-        lg_str8 snake;
-        lg_str8_pascal_to_snake_case(entry.name, ctx->scratch, &snake);
+        ak_str8 symbol_type = mrv_sg_fmt_symbol_type(ctx, entry.name);
+        ak_str8 snake;
+        ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &snake);
 
-        lg_write(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\n"));
-        lg_write(ctx->header_file_writer, symbol_type);
-        lg_write(ctx->header_file_writer, lg_str8_lit(" {\n    uint16_t id;"));
+        ak_write(ctx->header_file_writer, ak_str8_lit("\ntypedef struct\n"));
+        ak_write(ctx->header_file_writer, symbol_type);
+        ak_write(ctx->header_file_writer, ak_str8_lit(" {\n    uint16_t id;"));
 
-        lg_write(ctx->header_file_writer, lg_str8_lit("\n} "));
-        lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.name));
-        lg_write(ctx->header_file_writer, lg_str8_lit(";\n"));
+        ak_write(ctx->header_file_writer, ak_str8_lit("\n} "));
+        ak_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, entry.name));
+        ak_write(ctx->header_file_writer, ak_str8_lit(";\n"));
 
-        lg_strlist_append(&union_body, ctx->scratch, lg_str8_lit("\n    "));
-        lg_strlist_append(&union_body, ctx->scratch, symbol_type);
-        lg_strlist_append(&union_body, ctx->scratch, lg_str8_lit(" "));
-        lg_strlist_append(&union_body, ctx->scratch, snake);
-        lg_strlist_append(&union_body, ctx->scratch, lg_str8_lit(";"));
+        ak_strlist_append(&union_body, ctx->scratch, ak_str8_lit("\n    "));
+        ak_strlist_append(&union_body, ctx->scratch, symbol_type);
+        ak_strlist_append(&union_body, ctx->scratch, ak_str8_lit(" "));
+        ak_strlist_append(&union_body, ctx->scratch, snake);
+        ak_strlist_append(&union_body, ctx->scratch, ak_str8_lit(";"));
     }
 
-    lg_printf(
+    ak_printf(
         ctx->header_file_writer,
-        lg_str8_lit("\ntypedef union\nLG_%{str}Symbol_Any {"),
+        ak_str8_lit("\ntypedef union\nAK_%{str}Symbol_Any {"),
         ctx->ldesc->language_name
     );
-    lg_strlist_write(&union_body, ctx->header_file_writer);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}Symbol_Any;\n"), ctx->ldesc->language_name);
+    ak_strlist_write(&union_body, ctx->header_file_writer);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n} AK_%{str}Symbol_Any;\n"), ctx->ldesc->language_name);
 }
 
 void
 mrv_sg_node_types(MRV_SourcegenContext *ctx) {
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
         if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
-            lg_printf(
+            ak_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("\ntypedef struct\nLG_%{str}Node_%{str} {"),
+                ak_str8_lit("\ntypedef struct\nAK_%{str}Node_%{str} {"),
                 ctx->ldesc->language_name, entry.name
             );
 
             if (mrv_ldesc_ref_is_valid(entry.as.operator.left_arg_type)) {
-                lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
-                lg_printf(
+                ak_write(ctx->header_file_writer, ak_str8_lit("\n    "));
+                ak_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
+                ak_printf(
                     ctx->header_file_writer,
-                    lg_str8_lit(" %{str};"),
+                    ak_str8_lit(" %{str};"),
                     entry.as.operator.left_arg_name
                 );
             }
             if (mrv_ldesc_ref_is_valid(entry.as.operator.right_arg_type)) {
-                lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
-                lg_printf(
+                ak_write(ctx->header_file_writer, ak_str8_lit("\n    "));
+                ak_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
+                ak_printf(
                     ctx->header_file_writer,
-                    lg_str8_lit(" %{str};"),
+                    ak_str8_lit(" %{str};"),
                     entry.as.operator.right_arg_name
                 );
             }
             if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
-                lg_write(ctx->header_file_writer, lg_str8_lit("\n    "));
-                lg_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)));
-                lg_write(ctx->header_file_writer, lg_str8_lit(" return_val;"));
+                ak_write(ctx->header_file_writer, ak_str8_lit("\n    "));
+                ak_write(ctx->header_file_writer, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)));
+                ak_write(ctx->header_file_writer, ak_str8_lit(" return_val;"));
             }
             
-            lg_printf(
+            ak_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("\n} LG_%{str}Node_%{str};\n"),
+                ak_str8_lit("\n} AK_%{str}Node_%{str};\n"),
                 ctx->ldesc->language_name, entry.name
             );
         } else if (
             entry.kind == MRV_LanguageDescriptorEntryKind_Type &&
             entry.as.type.type_kind == MRV_TypeKind_Lambda
         ) {
-            lg_printf(
+            ak_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("\ntypedef struct\nLG_%{str}Node_%{str}Declaration {"),
+                ak_str8_lit("\ntypedef struct\nAK_%{str}Node_%{str}Declaration {"),
                 ctx->ldesc->language_name, entry.name
             );
 
             if (mrv_ldesc_ref_is_valid(entry.as.type.left_arg_type)) {
-                lg_printf(
+                ak_printf(
                     ctx->header_file_writer,
-                    lg_str8_lit("\n    %{str} left_arg;"),
+                    ak_str8_lit("\n    %{str} left_arg;"),
                     mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.left_arg_type))
                 );
             }
             if (mrv_ldesc_ref_is_valid(entry.as.type.right_arg_type)) {
-                lg_printf(
+                ak_printf(
                     ctx->header_file_writer,
-                    lg_str8_lit("\n    %{str} right_arg;"),
+                    ak_str8_lit("\n    %{str} right_arg;"),
                     mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.right_arg_type))
                 );
             }
             if (mrv_ldesc_ref_is_valid(entry.as.type.return_type)) {
-                lg_printf(
+                ak_printf(
                     ctx->header_file_writer,
-                    lg_str8_lit("\n    %{str} return_val;"),
+                    ak_str8_lit("\n    %{str} return_val;"),
                     mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.return_type))
                 );
             }
 
-            lg_printf(ctx->header_file_writer, lg_str8_lit("\n    uint32_t body_len;"));
+            ak_printf(ctx->header_file_writer, ak_str8_lit("\n    uint32_t body_len;"));
             
-            lg_printf(
+            ak_printf(
                 ctx->header_file_writer,
-                lg_str8_lit("\n} LG_%{str}Node_%{str}Declaration;\n"),
+                ak_str8_lit("\n} AK_%{str}Node_%{str}Declaration;\n"),
                 ctx->ldesc->language_name, entry.name
             );
         }
@@ -3644,55 +3644,55 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
 
 void
 mrv_sg_node_union_type(MRV_SourcegenContext *ctx) {
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\ntypedef union\nLG_%{str}Operands {"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\ntypedef union\nAK_%{str}Operands {"), ctx->ldesc->language_name);
     {
-        LG_TableIter iter = {0};
-        lg_table_iter_init(&iter, &ctx->ldesc->table);
+        AK_TableIter iter = {0};
+        ak_table_iter_init(&iter, &ctx->ldesc->table);
 
         size_t idx;
-        while (lg_table_iter_advance(&iter, &idx, NULL)) {
-            LG_Scope scope = lg_push_scope(ctx->scratch);
+        while (ak_table_iter_advance(&iter, &idx, NULL)) {
+            AK_Scope scope = ak_push_scope(ctx->scratch);
 
             MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
-            lg_str8 name_snake_case = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
+            ak_str8 name_snake_case = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
 
             if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
-                lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Node_%{str} %{str};"), ctx->ldesc->language_name, entry.name, name_snake_case);
+                ak_printf(ctx->header_file_writer, ak_str8_lit("\n    AK_%{str}Node_%{str} %{str};"), ctx->ldesc->language_name, entry.name, name_snake_case);
             }
 
-            lg_pop_scope(ctx->scratch, scope);
+            ak_pop_scope(ctx->scratch, scope);
         }
     }
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}Operands;\n"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n} AK_%{str}Operands;\n"), ctx->ldesc->language_name);
 
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\nLG_%{str}Node {"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Opcode opcode;"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Operands as;"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}Node;\n"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\ntypedef struct\nAK_%{str}Node {"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n    AK_%{str}Opcode opcode;"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n    AK_%{str}Operands as;"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n} AK_%{str}Node;\n"), ctx->ldesc->language_name);
 }
 
 void
 mrv_sg_builder_types(MRV_SourcegenContext *ctx) {
-    const lg_str8 list_template = lg_str8_lit(R"(
+    const ak_str8 list_template = ak_str8_lit(R"(
 typedef struct
-LG_${{lang_name}}Clist {
-    struct LG_${{lang_name}}Clist *prev;
+AK_${{lang_name}}Clist {
+    struct AK_${{lang_name}}Clist *prev;
     uint32_t cap;
     uint32_t len;
-    LG_${{lang_name}}Node nodes[] lg_check_bounds(cap);
-} LG_${{lang_name}}Clist;
+    AK_${{lang_name}}Node nodes[] ak_check_bounds(cap);
+} AK_${{lang_name}}Clist;
 )");
 
-    const lg_str8 builder_template = lg_str8_lit(R"(
+    const ak_str8 builder_template = ak_str8_lit(R"(
 typedef struct
-LG_${{lang_name}}Builder {
-    struct LG_${{lang_name}}Clist *nodes_tail;
+AK_${{lang_name}}Builder {
+    struct AK_${{lang_name}}Clist *nodes_tail;
     uint32_t next_symbol_id;
-} LG_${{lang_name}}Builder;
+} AK_${{lang_name}}Builder;
 )");
 
     MRV_TmplFieldTable fields[] = {
-        {lg_str8_lit("lang_name"),  { .str = ctx->ldesc->language_name }},
+        {ak_str8_lit("lang_name"),  { .str = ctx->ldesc->language_name }},
     };
     mrv_write_tmpl(ctx->header_file_writer, list_template, fields, sizeof(fields) / sizeof(fields[0]));
     mrv_write_tmpl(ctx->header_file_writer, builder_template, fields, sizeof(fields) / sizeof(fields[0]));
@@ -3700,33 +3700,33 @@ LG_${{lang_name}}Builder {
 
 void
 mrv_sg_expr_type(MRV_SourcegenContext *ctx) {
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\ntypedef struct\nLG_%{str}Expr {"), ctx->ldesc->language_name);
-    lg_write(ctx->header_file_writer, lg_str8_lit("\n    size_t cap;"));
-    lg_write(ctx->header_file_writer, lg_str8_lit("\n    size_t len;"));
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n    LG_%{str}Node *nodes;"), ctx->ldesc->language_name);
-    lg_printf(ctx->header_file_writer, lg_str8_lit("\n} LG_%{str}Expr;\n"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\ntypedef struct\nAK_%{str}Expr {"), ctx->ldesc->language_name);
+    ak_write(ctx->header_file_writer, ak_str8_lit("\n    size_t cap;"));
+    ak_write(ctx->header_file_writer, ak_str8_lit("\n    size_t len;"));
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n    AK_%{str}Node *nodes;"), ctx->ldesc->language_name);
+    ak_printf(ctx->header_file_writer, ak_str8_lit("\n} AK_%{str}Expr;\n"), ctx->ldesc->language_name);
 }
 
 void
 mrv_sg_redex_types(MRV_SourcegenContext *ctx) {
-    const lg_str8 template = lg_str8_lit(R"(
+    const ak_str8 template = ak_str8_lit(R"(
 typedef struct
-LG_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
-} LG_${{lang_name}}Redex_${{comb_name}};
+AK_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
+} AK_${{lang_name}}Redex_${{comb_name}};
 )");
 
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
 
         if (entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
             continue;
         }
 
-        LG_StringList members = {0};
+        AK_StringList members = {0};
         // the first n arg nodes of the instruction stream are the args of the combinator itself
         uint32_t i_current_inst = 0;
         while (
@@ -3740,22 +3740,22 @@ LG_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
         ) {
             MRV_Inst_Arg arg = entry.as.combinator.istream.insts[i_current_inst].as.arg;
             MRV_SymbolTable symtab_entry = entry.as.combinator.istream.symtab[arg.sym.id];
-            lg_str8 type_name = mrv_ldesc_get_name(ctx->ldesc, symtab_entry.type);
-            lg_str8 ident_str = mrv_span_to_str8(symtab_entry.ident_span, ctx->text);
+            ak_str8 type_name = mrv_ldesc_get_name(ctx->ldesc, symtab_entry.type);
+            ak_str8 ident_str = mrv_span_to_str8(symtab_entry.ident_span, ctx->text);
 
-            lg_strlist_append(&members, ctx->scratch, lg_str8_lit("\n    "));
-            lg_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, type_name));
-            lg_strlist_append(&members, ctx->scratch, lg_str8_lit(" "));
-            lg_strlist_append(&members, ctx->scratch, ident_str);
-            lg_strlist_append(&members, ctx->scratch, lg_str8_lit(";"));
+            ak_strlist_append(&members, ctx->scratch, ak_str8_lit("\n    "));
+            ak_strlist_append(&members, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, type_name));
+            ak_strlist_append(&members, ctx->scratch, ak_str8_lit(" "));
+            ak_strlist_append(&members, ctx->scratch, ident_str);
+            ak_strlist_append(&members, ctx->scratch, ak_str8_lit(";"));
 
             i_current_inst++;
         }
 
         MRV_TmplFieldTable fields[] = {
-            {lg_str8_lit("lang_name"),  { .str = ctx->ldesc->language_name }},
-            {lg_str8_lit("comb_name"),  { .str = entry.name }},
-            {lg_str8_lit("members"),    { .strlist = members }},
+            {ak_str8_lit("lang_name"),  { .str = ctx->ldesc->language_name }},
+            {ak_str8_lit("comb_name"),  { .str = entry.name }},
+            {ak_str8_lit("members"),    { .strlist = members }},
         };
         mrv_write_tmpl(ctx->header_file_writer, template, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
     }
@@ -3763,31 +3763,31 @@ LG_${{lang_name}}Redex_${{comb_name}} {${{L:members}}
 
 void
 mrv_sg_append_fn(MRV_SourcegenContext *ctx) {
-    const lg_str8 header_tmpl = lg_str8_lit(R"(
-lg_force_inline ${{L:return_type}}
-lg_${{lang_first_letter}}builder_${{op_snake}}(
-    LG_Context *ctx,
-    LG_${{lang_name}}Builder *builder${{L:operands}}
+    const ak_str8 header_tmpl = ak_str8_lit(R"(
+ak_force_inline ${{L:return_type}}
+ak_${{lang_first_letter}}builder_${{op_snake}}(
+    AK_Context *ctx,
+    AK_${{lang_name}}Builder *builder${{L:operands}}
 );
 )");
-    const lg_str8 source_tmpl = lg_str8_lit(R"(
-lg_force_inline ${{L:return_type}}
-lg_${{lang_first_letter}}builder_${{op_snake}}(
-    LG_Context *ctx,
-    LG_${{lang_name}}Builder *builder${{L:operands}}
+    const ak_str8 source_tmpl = ak_str8_lit(R"(
+ak_force_inline ${{L:return_type}}
+ak_${{lang_first_letter}}builder_${{op_snake}}(
+    AK_Context *ctx,
+    AK_${{lang_name}}Builder *builder${{L:operands}}
 ) {
-    LG_${{lang_name}}Node node = {
-        .opcode = LG_${{lang_name}}Opcode_${{op}},
-        .as.${{op_var_ident}} = (LG_${{lang_name}}Node_${{op}}){${{L:props}}},
+    AK_${{lang_name}}Node node = {
+        .opcode = AK_${{lang_name}}Opcode_${{op}},
+        .as.${{op_var_ident}} = (AK_${{lang_name}}Node_${{op}}){${{L:props}}},
     };
 
     if (builder->nodes_tail->len < builder->nodes_tail->cap) {
         builder->nodes_tail->nodes[builder->nodes_tail->len] = node;
         builder->nodes_tail->len++;
     } else {
-        LG_${{lang_name}}Clist *clist = lg_arena_alloc_famstruct(&ctx->arena, LG_${{lang_name}}Clist, 8 * sizeof(LG_${{lang_name}}Node));
+        AK_${{lang_name}}Clist *clist = ak_arena_alloc_famstruct(&ctx->arena, AK_${{lang_name}}Clist, 8 * sizeof(AK_${{lang_name}}Node));
         if (clist == NULL) {
-            lg_report_error(ctx, LG_StatusKind_OutOfMemory, lg_str8_lit("ran out of memory appending to ${{lang_snake}} expr"));
+            ak_report_error(ctx, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory appending to ${{lang_snake}} expr"));
             ${{early_return_statement}}
         }
         
@@ -3802,185 +3802,185 @@ lg_${{lang_first_letter}}builder_${{op_snake}}(
     })");
 
     
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
 
         if (entry.kind != MRV_LanguageDescriptorEntryKind_Operator) {
             continue;
         }
 
-        LG_Scope scope = lg_push_scope(ctx->scratch);
-        LG_StatusKind status = LG_StatusKind_OK;
-        lg_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
-        lg_str8 name_snake;
-        status = lg_str8_pascal_to_snake_case(entry.name, ctx->scratch, &name_snake);
-        lg_assert(status == LG_StatusKind_OK);
+        AK_Scope scope = ak_push_scope(ctx->scratch);
+        AK_StatusKind status = AK_StatusKind_OK;
+        ak_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
+        ak_str8 name_snake;
+        status = ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &name_snake);
+        ak_assert(status == AK_StatusKind_OK);
 
-        LG_StringList operands = {0};
-        LG_StringList props = {0};
+        AK_StringList operands = {0};
+        AK_StringList props = {0};
 
         if (mrv_ldesc_ref_is_valid(entry.as.operator.left_arg_type)) {
-            lg_str8 arg_name_snake = {0};
-            status = lg_str8_pascal_to_snake_case(entry.as.operator.left_arg_name, ctx->scratch, &arg_name_snake);
-            lg_assert(status == LG_StatusKind_OK);
+            ak_str8 arg_name_snake = {0};
+            status = ak_str8_pascal_to_snake_case(entry.as.operator.left_arg_name, ctx->scratch, &arg_name_snake);
+            ak_assert(status == AK_StatusKind_OK);
 
-            lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(",\n    "));
-            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
-            lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
-            lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(",\n    "));
+            ak_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
+            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(" "));
+            ak_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            ."));
-            lg_strlist_append(&props, ctx->scratch, arg_name_snake);
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit(" = "));
-            lg_strlist_append(&props, ctx->scratch, arg_name_snake);
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit(","));
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            ."));
+            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(" = "));
+            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(","));
         }
         if (mrv_ldesc_ref_is_valid(entry.as.operator.right_arg_type)) {
-            lg_str8 arg_name_snake = {0};
-            status = lg_str8_pascal_to_snake_case(entry.as.operator.right_arg_name, ctx->scratch, &arg_name_snake);
-            lg_assert(status == LG_StatusKind_OK);
+            ak_str8 arg_name_snake = {0};
+            status = ak_str8_pascal_to_snake_case(entry.as.operator.right_arg_name, ctx->scratch, &arg_name_snake);
+            ak_assert(status == AK_StatusKind_OK);
 
-            lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(",\n    "));
-            lg_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
-            lg_strlist_append(&operands, ctx->scratch, lg_str8_lit(" "));
-            lg_strlist_append(&operands, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(",\n    "));
+            ak_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
+            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(" "));
+            ak_strlist_append(&operands, ctx->scratch, arg_name_snake);
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            ."));
-            lg_strlist_append(&props, ctx->scratch, arg_name_snake);
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit(" = "));
-            lg_strlist_append(&props, ctx->scratch, arg_name_snake);
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit(","));
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            ."));
+            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(" = "));
+            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(","));
         }
 
-        lg_str8 early_return_statement;
-        LG_StringList return_type = {0};
+        ak_str8 early_return_statement;
+        AK_StringList return_type = {0};
         if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
-            lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("LG_"));
-            lg_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
-            lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_"));
-            lg_strlist_append(&return_type, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
+            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("AK_"));
+            ak_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
+            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("Symbol_"));
+            ak_strlist_append(&return_type, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
 
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .return_val = "));
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            .return_val = "));
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
 
-            status = lg_sprintf(
+            status = ak_sprintf(
                 ctx->scratch,
                 &early_return_statement,
-                lg_str8_lit("return lg_nil(LG_%{str}Symbol_%{str});"),
+                ak_str8_lit("return ak_nil(AK_%{str}Symbol_%{str});"),
                 ctx->ldesc->language_name,
                 mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)
             );
-            lg_assert(status == LG_StatusKind_OK);
+            ak_assert(status == AK_StatusKind_OK);
         } else {
-            lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("void"));
-            early_return_statement = lg_str8_lit("return;");
+            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("void"));
+            early_return_statement = ak_str8_lit("return;");
         }
 
         if (props.tail != NULL) {
-            lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n        "));
+            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n        "));
         }
 
         MRV_TmplFieldTable fields[] = {
-            {lg_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
-            {lg_str8_lit("lang_first_letter"),       { .str = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
-            {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
-            {lg_str8_lit("return_type"),             { .strlist = return_type }},
-            {lg_str8_lit("early_return_statement"),  { .str = early_return_statement }},
-            {lg_str8_lit("op"),                      { .str = entry.name }},
-            {lg_str8_lit("op_snake"),                { .str = name_snake }},
-            {lg_str8_lit("op_var_ident"),            { .str = var_ident }},
-            {lg_str8_lit("operands"),                { .strlist = operands }},
-            {lg_str8_lit("props"),                   { .strlist = props }},
+            {ak_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
+            {ak_str8_lit("lang_first_letter"),       { .str = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
+            {ak_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
+            {ak_str8_lit("return_type"),             { .strlist = return_type }},
+            {ak_str8_lit("early_return_statement"),  { .str = early_return_statement }},
+            {ak_str8_lit("op"),                      { .str = entry.name }},
+            {ak_str8_lit("op_snake"),                { .str = name_snake }},
+            {ak_str8_lit("op_var_ident"),            { .str = var_ident }},
+            {ak_str8_lit("operands"),                { .strlist = operands }},
+            {ak_str8_lit("props"),                   { .strlist = props }},
         };
         mrv_write_tmpl(ctx->header_file_writer, header_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
         mrv_write_tmpl(ctx->source_file_writer, source_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
 
         if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
-            lg_printf(ctx->source_file_writer, lg_str8_lit(
+            ak_printf(ctx->source_file_writer, ak_str8_lit(
                 "\n\n    builder->next_symbol_id++;"
-                "\n    return (LG_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
+                "\n    return (AK_%{str}Symbol_%{str}){ .id = builder->next_symbol_id };"
             ), ctx->ldesc->language_name, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
         }
 
-        lg_write(ctx->source_file_writer, lg_str8_lit("\n}\n"));
+        ak_write(ctx->source_file_writer, ak_str8_lit("\n}\n"));
 
-        lg_pop_scope(ctx->scratch, scope);
+        ak_pop_scope(ctx->scratch, scope);
     }
 
-    LG_Scope scope = lg_push_scope(ctx->scratch);
+    AK_Scope scope = ak_push_scope(ctx->scratch);
 
-    LG_StringList return_type = {0};
-    lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("LG_"));
-    lg_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
-    lg_strlist_append(&return_type, ctx->scratch, lg_str8_lit("Symbol_AnyArg"));
+    AK_StringList return_type = {0};
+    ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("AK_"));
+    ak_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
+    ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("Symbol_AnyArg"));
 
-    lg_str8 early_return_statement = {0};
-    LG_StatusKind status = lg_sprintf(
+    ak_str8 early_return_statement = {0};
+    AK_StatusKind status = ak_sprintf(
         ctx->scratch,
         &early_return_statement,
-        lg_str8_lit("return lg_nil(LG_%{str}Symbol_AnyArg);"),
+        ak_str8_lit("return ak_nil(AK_%{str}Symbol_AnyArg);"),
         ctx->ldesc->language_name
     );
-    lg_assert(status == LG_StatusKind_OK);
+    ak_assert(status == AK_StatusKind_OK);
 
-    LG_StringList operands = {0};
-    lg_strlist_append(&operands, ctx->scratch, lg_str8_lit("\n    LG_"));
-    lg_strlist_append(&operands, ctx->scratch, ctx->ldesc->language_name);
-    lg_strlist_append(&operands, ctx->scratch, lg_str8_lit("Symbol_AnyArg sym"));
+    AK_StringList operands = {0};
+    ak_strlist_append(&operands, ctx->scratch, ak_str8_lit("\n    AK_"));
+    ak_strlist_append(&operands, ctx->scratch, ctx->ldesc->language_name);
+    ak_strlist_append(&operands, ctx->scratch, ak_str8_lit("Symbol_AnyArg sym"));
 
-    LG_StringList props = {0};
-    lg_strlist_append(&props, ctx->scratch, lg_str8_lit("\n            .sym = sym,\n        "));
+    AK_StringList props = {0};
+    ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            .sym = sym,\n        "));
 
     MRV_TmplFieldTable fields[] = {
-        {lg_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
-        {lg_str8_lit("lang_first_letter"),       { .str = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
-        {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
-        {lg_str8_lit("return_type"),             { .strlist = return_type }},
-        {lg_str8_lit("early_return_statement"),  { .str = early_return_statement }},
-        {lg_str8_lit("op"),                      { .str = lg_str8_lit("AnyArg") }},
-        {lg_str8_lit("op_snake"),                { .str = lg_str8_lit("any_arg") }},
-        {lg_str8_lit("op_var_ident"),            { .str = lg_str8_lit("any_arg") }},
-        {lg_str8_lit("operands"),                { .strlist = operands }},
-        {lg_str8_lit("props"),                   { .strlist = props }},
+        {ak_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
+        {ak_str8_lit("lang_first_letter"),       { .str = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
+        {ak_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
+        {ak_str8_lit("return_type"),             { .strlist = return_type }},
+        {ak_str8_lit("early_return_statement"),  { .str = early_return_statement }},
+        {ak_str8_lit("op"),                      { .str = ak_str8_lit("AnyArg") }},
+        {ak_str8_lit("op_snake"),                { .str = ak_str8_lit("any_arg") }},
+        {ak_str8_lit("op_var_ident"),            { .str = ak_str8_lit("any_arg") }},
+        {ak_str8_lit("operands"),                { .strlist = operands }},
+        {ak_str8_lit("props"),                   { .strlist = props }},
     };
     mrv_write_tmpl(ctx->header_file_writer, header_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
     mrv_write_tmpl(ctx->source_file_writer, source_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
 
-    lg_printf(ctx->source_file_writer, lg_str8_lit(
+    ak_printf(ctx->source_file_writer, ak_str8_lit(
         "\n\n    builder->next_symbol_id++;"
-        "\n    return (LG_%{str}Symbol_AnyArg){ .id = builder->next_symbol_id };\n}\n"
+        "\n    return (AK_%{str}Symbol_AnyArg){ .id = builder->next_symbol_id };\n}\n"
     ), ctx->ldesc->language_name);
 
-    lg_pop_scope(ctx->scratch, scope);
+    ak_pop_scope(ctx->scratch, scope);
 }
 
 void
 mrv_sg_combinator_functions(MRV_SourcegenContext *ctx) {
-    const lg_str8 header_template = lg_str8_lit(R"(
+    const ak_str8 header_template = ak_str8_lit(R"(
 void
-lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
-    LG_${{lang_name}}Builder *${{lang_first_letter}}builder,
-    LG_${{lang_name}}Redex_${{comb_name}} *redex
+ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
+    AK_${{lang_name}}Builder *${{lang_first_letter}}builder,
+    AK_${{lang_name}}Redex_${{comb_name}} *redex
 );
 )");
-    const lg_str8 source_template = lg_str8_lit(R"(
+    const ak_str8 source_template = ak_str8_lit(R"(
 void
-lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
-    LG_${{lang_name}}Builder *${{lang_first_letter}}builder,
-    LG_${{lang_name}}Redex_${{comb_name}} *redex
+ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
+    AK_${{lang_name}}Builder *${{lang_first_letter}}builder,
+    AK_${{lang_name}}Redex_${{comb_name}} *redex
 ) {${{L:statements}}
 }
 )");
-    LG_TableIter iter = {0};
-    lg_table_iter_init(&iter, &ctx->ldesc->table);
+    AK_TableIter iter = {0};
+    ak_table_iter_init(&iter, &ctx->ldesc->table);
 
     size_t idx;
-    while (lg_table_iter_advance(&iter, &idx, NULL)) {
-        LG_Scope scope = lg_push_scope(ctx->scratch);
+    while (ak_table_iter_advance(&iter, &idx, NULL)) {
+        AK_Scope scope = ak_push_scope(ctx->scratch);
 
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
 
@@ -3988,14 +3988,14 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
             continue;
         }
 
-        lg_str8 comb_name_snake;
-        LG_StatusKind status = lg_str8_pascal_to_snake_case(entry.name, ctx->scratch, &comb_name_snake);
-        lg_assert(status == LG_StatusKind_OK);
+        ak_str8 comb_name_snake;
+        AK_StatusKind status = ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &comb_name_snake);
+        ak_assert(status == AK_StatusKind_OK);
 
-        lg_str8 lang_first_letter = (lg_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p };
+        ak_str8 lang_first_letter = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p };
 
         const MRV_InstStream istream = entry.as.combinator.istream;
-        LG_StringList statements = {0};
+        AK_StringList statements = {0};
 
         for (
             uint32_t i = 0;
@@ -4007,52 +4007,52 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
         for (uint32_t i = 0; i < istream.len; i++) {
             if (istream.insts[i].kind == MRV_InstKind_Invocation) {
                 MRV_LanguageDescriptorEntry op_entry = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.insts[i].as.invocation.operator)];
-                lg_assert(op_entry.kind = MRV_LanguageDescriptorEntryKind_Operator);
+                ak_assert(op_entry.kind = MRV_LanguageDescriptorEntryKind_Operator);
 
-                lg_str8 sym_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.new_symbol.id].ident_span, ctx->text);
-                lg_str8 op_snake;
-                status = lg_str8_pascal_to_snake_case(op_entry.name, ctx->scratch, &op_snake);
-                lg_assert(status == LG_StatusKind_OK);
+                ak_str8 sym_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.new_symbol.id].ident_span, ctx->text);
+                ak_str8 op_snake;
+                status = ak_str8_pascal_to_snake_case(op_entry.name, ctx->scratch, &op_snake);
+                ak_assert(status == AK_StatusKind_OK);
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
 
                 if (mrv_ldesc_ref_is_valid(op_entry.as.operator.return_type)) {
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
-                    lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                    lg_strlist_append(&statements, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, op_entry.as.operator.return_type));
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" "));
-                    lg_strlist_append(&statements, ctx->scratch, sym_name);
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" = "));
+                    ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("AK_"));
+                    ak_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
+                    ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("Symbol_"));
+                    ak_strlist_append(&statements, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, op_entry.as.operator.return_type));
+                    ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(" "));
+                    ak_strlist_append(&statements, ctx->scratch, sym_name);
+                    ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(" = "));
                 }
 
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("lg_"));
-                lg_strlist_append(&statements, ctx->scratch, lang_first_letter);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("builder_"));
-                lg_strlist_append(&statements, ctx->scratch, op_snake);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("("));
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("ak_"));
+                ak_strlist_append(&statements, ctx->scratch, lang_first_letter);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("builder_"));
+                ak_strlist_append(&statements, ctx->scratch, op_snake);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("("));
 
                 if (mrv_ldesc_ref_is_valid(op_entry.as.operator.left_arg_type)) {
                     MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.left_arg.id].type)].as.type.type_kind;
                     if (arg_type_kind == MRV_TypeKind_Host) {
-                        lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("redex->"));
+                        ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("redex->"));
                     }
 
-                    lg_str8 arg_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.left_arg.id].ident_span, ctx->text);
-                    lg_strlist_append(&statements, ctx->scratch, arg_name);
+                    ak_str8 arg_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.left_arg.id].ident_span, ctx->text);
+                    ak_strlist_append(&statements, ctx->scratch, arg_name);
                 }
                 if (mrv_ldesc_ref_is_valid(op_entry.as.operator.right_arg_type)) {
-                    lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(", "));
+                    ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(", "));
 
                     MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.right_arg.id].type)].as.type.type_kind;
                     if (arg_type_kind == MRV_TypeKind_Host) {
-                        lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("redex->"));
+                        ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("redex->"));
                     }
 
-                    lg_str8 arg_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.right_arg.id].ident_span, ctx->text);
-                    lg_strlist_append(&statements, ctx->scratch, arg_name);
+                    ak_str8 arg_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.right_arg.id].ident_span, ctx->text);
+                    ak_strlist_append(&statements, ctx->scratch, arg_name);
                 }
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(");"));
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(");"));
             } else if (istream.insts[i].kind == MRV_InstKind_Lambda) {
                 MRV_Symbol new_sym = istream.insts[i].as.lambda.new_symbol;
                 if (new_sym.id == 0) {
@@ -4060,8 +4060,8 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 }
 
                 MRV_LanguageDescriptorRef lambda_type = istream.symtab[new_sym.id].type;
-                lg_str8 ret_type_str = mrv_ldesc_get_name(ctx->ldesc, lambda_type);
-                lg_str8 name_str = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
+                ak_str8 ret_type_str = mrv_ldesc_get_name(ctx->ldesc, lambda_type);
+                ak_str8 name_str = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
                 uint32_t n_args = 0;
                 if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.left_arg_type)) {
                     n_args++;
@@ -4071,91 +4071,91 @@ lg_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 }
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
-                lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                lg_strlist_append(&statements, ctx->scratch, ret_type_str);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" "));
-                lg_strlist_append(&statements, ctx->scratch, name_str);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("AK_"));
+                ak_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("Symbol_"));
+                ak_strlist_append(&statements, ctx->scratch, ret_type_str);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(" "));
+                ak_strlist_append(&statements, ctx->scratch, name_str);
 
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit(" = ("));
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("LG_"));
-                lg_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("Symbol_"));
-                lg_strlist_append(&statements, ctx->scratch, ret_type_str);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("){"));
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(" = ("));
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("AK_"));
+                ak_strlist_append(&statements, ctx->scratch, ctx->ldesc->language_name);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("Symbol_"));
+                ak_strlist_append(&statements, ctx->scratch, ret_type_str);
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("){"));
                 indent++;
                 {
-                    lg_str8 args_len;
-                    status = lg_sprintf(ctx->scratch, &args_len, lg_str8_lit(".args_len = %{i64},"), n_args);
-                    lg_assert(status == LG_StatusKind_OK);
+                    ak_str8 args_len;
+                    status = ak_sprintf(ctx->scratch, &args_len, ak_str8_lit(".args_len = %{i64},"), n_args);
+                    ak_assert(status == AK_StatusKind_OK);
 
-                    lg_str8 body_len;
-                    status = lg_sprintf(ctx->scratch, &body_len, lg_str8_lit(".body_len = %{i64},"), n_args);
-                    lg_assert(status == LG_StatusKind_OK);
-
-                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, args_len);
+                    ak_str8 body_len;
+                    status = ak_sprintf(ctx->scratch, &body_len, ak_str8_lit(".body_len = %{i64},"), n_args);
+                    ak_assert(status == AK_StatusKind_OK);
 
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                    lg_strlist_append(&statements, ctx->scratch, body_len);
+                    ak_strlist_append(&statements, ctx->scratch, args_len);
+
+                    mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
+                    ak_strlist_append(&statements, ctx->scratch, body_len);
                 }
                 indent--;
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                lg_strlist_append(&statements, ctx->scratch, lg_str8_lit("};"));
+                ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("};"));
 
                 uint32_t last_arg = i + n_args;
                 i++; // skip the lambda node itself
                 while (true) {
-                    lg_assert(istream.insts[i].kind == MRV_InstKind_Arg);
+                    ak_assert(istream.insts[i].kind == MRV_InstKind_Arg);
 
                     MRV_Symbol arg_sym = istream.insts[i].as.arg.sym;
-                    lg_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
-                    lg_str8 arg_type = mrv_ldesc_get_name(ctx->ldesc, istream.symtab[arg_sym.id].type);
-                    lg_str8 arg_stmt;
-                    lg_sprintf(
+                    ak_str8 arg_name = mrv_span_to_str8(istream.symtab[arg_sym.id].ident_span, ctx->text);
+                    ak_str8 arg_type = mrv_ldesc_get_name(ctx->ldesc, istream.symtab[arg_sym.id].type);
+                    ak_str8 arg_stmt;
+                    ak_sprintf(
                         ctx->scratch,
                         &arg_stmt,
-                        lg_str8_lit("LG_%{str}Symbol_%{str} %{str} = lg_unreachable(\"TODO\");"),
+                        ak_str8_lit("AK_%{str}Symbol_%{str} %{str} = ak_unreachable(\"TODO\");"),
                         ctx->ldesc->language_name, arg_type, arg_name
                     );
 
                     if (i >= last_arg) {
                         mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
-                        lg_strlist_append(&statements, ctx->scratch, arg_stmt);
+                        ak_strlist_append(&statements, ctx->scratch, arg_stmt);
                         break;
                     } else {
-                        lg_strlist_append(&statements, ctx->scratch, arg_stmt);
+                        ak_strlist_append(&statements, ctx->scratch, arg_stmt);
                         i++; // if we always incremented, we would skip the first of the lambda body
                     }
                 }
             } else {
-                // lg_unreachable();
+                // ak_unreachable();
             }
         }
 
         MRV_TmplFieldTable fields[] = {
-            {lg_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
-            {lg_str8_lit("lang_first_letter"),       { .str = lang_first_letter }},
-            {lg_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
-            {lg_str8_lit("comb_name"),               { .str = entry.name }},
-            {lg_str8_lit("comb_name_snake"),         { .str = comb_name_snake }},
-            {lg_str8_lit("statements"),              { .strlist = statements }},
+            {ak_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
+            {ak_str8_lit("lang_first_letter"),       { .str = lang_first_letter }},
+            {ak_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
+            {ak_str8_lit("comb_name"),               { .str = entry.name }},
+            {ak_str8_lit("comb_name_snake"),         { .str = comb_name_snake }},
+            {ak_str8_lit("statements"),              { .strlist = statements }},
         };
         mrv_write_tmpl(ctx->header_file_writer, header_template, fields, sizeof(fields) / sizeof(fields[0]));
         mrv_write_tmpl(ctx->source_file_writer, source_template, fields, sizeof(fields) / sizeof(fields[0]));
 
-        lg_pop_scope(ctx->scratch, scope);
+        ak_pop_scope(ctx->scratch, scope);
     }
 }
 
 void
 mrv_gen_source(
-    LG_Writer *header_file_writer,
-    LG_Writer *source_file_writer,
-    LG_Arena *scratch_allocator,
+    AK_Writer *header_file_writer,
+    AK_Writer *source_file_writer,
+    AK_Arena *scratch_allocator,
     MRV_LanguageDescriptor *ldesc,
-    lg_str8 text
+    ak_str8 text
 ) {
     MRV_SourcegenContext ctx = {
         .header_file_writer = header_file_writer,
@@ -4165,28 +4165,28 @@ mrv_gen_source(
         .ldesc = ldesc,
     };
 
-    LG_Scope scope = lg_push_scope(ctx.scratch);
+    AK_Scope scope = ak_push_scope(ctx.scratch);
 
     // common strigs
     {
-        LG_StatusKind status = LG_StatusKind_OK;
+        AK_StatusKind status = AK_StatusKind_OK;
 
-        status = lg_str8_to_upper(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_capitalized);
-        status = lg_str8_pascal_to_snake_case(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_snake_case);
+        status = ak_str8_to_upper(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_capitalized);
+        status = ak_str8_pascal_to_snake_case(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_snake_case);
 
-        lg_assert(status == LG_StatusKind_OK);
+        ak_assert(status == AK_StatusKind_OK);
     }
 
-    lg_printf(
+    ak_printf(
         header_file_writer, 
-        lg_str8_lit(
-            "#ifndef LG_%{str}_GEN_H_\n"
-            "#define LG_%{str}_GEN_H_\n"
+        ak_str8_lit(
+            "#ifndef AK_%{str}_GEN_H_\n"
+            "#define AK_%{str}_GEN_H_\n"
         ), 
         ctx.common_strings.lang_capitalized,
         ctx.common_strings.lang_capitalized
     );
-    lg_write(header_file_writer, lg_str8_lit("\n#include <libgrad/internal/base.h>\n"));
+    ak_write(header_file_writer, ak_str8_lit("\n#include <akimbo/internal/base.h>\n"));
     {
         mrv_sg_type_enum(&ctx);
         mrv_sg_opcode_enum(&ctx);
@@ -4199,9 +4199,9 @@ mrv_gen_source(
         mrv_sg_append_fn(&ctx);
         mrv_sg_combinator_functions(&ctx);
     }
-    lg_printf(header_file_writer, lg_str8_lit("\n#endif // LG_%{str}_GEN_H_\n"), ctx.common_strings.lang_capitalized);
+    ak_printf(header_file_writer, ak_str8_lit("\n#endif // AK_%{str}_GEN_H_\n"), ctx.common_strings.lang_capitalized);
 
-    lg_pop_scope(ctx.scratch, scope);
+    ak_pop_scope(ctx.scratch, scope);
 }
 
 
@@ -4215,36 +4215,36 @@ mrv_gen_source(
 #include <stdio.h>
 #include <stdlib.h>
 
-LG_AllocatorModeReturn
-libc_allocator_f(void *ctx, LG_AllocatorModeKind mode_kind, LG_AllocatorModeParams params) {
+AK_AllocatorModeReturn
+libc_allocator_f(void *ctx, AK_AllocatorModeKind mode_kind, AK_AllocatorModeParams params) {
     (void)ctx;
     switch (mode_kind) {
-        case LG_AllocatorModeKind_Alloc:
-            return (LG_AllocatorModeReturn){ .alloc.ptr = malloc(params.alloc.size_bytes) };
-        case LG_AllocatorModeKind_Free:
+        case AK_AllocatorModeKind_Alloc:
+            return (AK_AllocatorModeReturn){ .alloc.ptr = malloc(params.alloc.size_bytes) };
+        case AK_AllocatorModeKind_Free:
             free(params.free.ptr);
-            return (LG_AllocatorModeReturn){0};
-        case LG_AllocatorModeKind_GetDefaultPreAllocation:
-            return (LG_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
-        case LG_AllocatorModeKind_GetFlags:
-            return (LG_AllocatorModeReturn){ .get_flags.flags = 0};
+            return (AK_AllocatorModeReturn){0};
+        case AK_AllocatorModeKind_GetDefaultPreAllocation:
+            return (AK_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
+        case AK_AllocatorModeKind_GetFlags:
+            return (AK_AllocatorModeReturn){ .get_flags.flags = 0};
         default:
-            lg_unreachable();
+            ak_unreachable();
     }
 }
 
 size_t
-write_stdout(void *ctx, lg_str8 msg) {
+write_stdout(void *ctx, ak_str8 msg) {
     (void)ctx;
     return printf("%.*s", (int32_t)msg.len, msg.p);
 }
 
-static LG_Allocator 
+static AK_Allocator 
 libc_allocator = {
     .f = libc_allocator_f,
 };
 
-static LG_Writer 
+static AK_Writer 
 libc_writer = {
     .write = write_stdout,
 };
@@ -4253,30 +4253,30 @@ int
 main(int32_t argc, char **argv) {
     int32_t ret_code = 0;
 
-    LG_Arena scratch_allocator = {0};
-    lg_arena_init(&scratch_allocator, libc_allocator);
+    AK_Arena scratch_allocator = {0};
+    ak_arena_init(&scratch_allocator, libc_allocator);
     
-    lg_str8 *args = lg_arena_alloc_array(&scratch_allocator, lg_str8, argc);
-    lg_assert(args != NULL);
+    ak_str8 *args = ak_arena_alloc_array(&scratch_allocator, ak_str8, argc);
+    ak_assert(args != NULL);
     for (int32_t i = 0; i < argc; i++) {
-        args[i] = lg_str8_from_cstr((uint8_t*)argv[i]);
+        args[i] = ak_str8_from_cstr((uint8_t*)argv[i]);
     }
 
     if (argc < 2) {
-        lg_printf(&libc_writer, lg_str8_lit("provide the input file as the first argument\n"));
+        ak_printf(&libc_writer, ak_str8_lit("provide the input file as the first argument\n"));
         ret_code = -1;
         goto out_free_all;
     }
 
-    // lg_assert(args[0].p[args[0].len] == 0);
+    // ak_assert(args[0].p[args[0].len] == 0);
     FILE *file = fopen((const char*)args[1].p, "r+");
-    lg_assert(file != NULL);
+    ak_assert(file != NULL);
 
     uint8_t file_contents[4096] = {0};
     size_t chunks_read = fread(file_contents, sizeof(file_contents) / 4, 4, file);
-    lg_assert(chunks_read > 0);
+    ak_assert(chunks_read > 0);
 
-    lg_str8 text = (lg_str8){ .len = 4096, .p = file_contents };
+    ak_str8 text = (ak_str8){ .len = 4096, .p = file_contents };
     MRV_TokenStream tstream = mrv_lex(libc_allocator, text, &libc_writer);
 
     (void)text;
@@ -4300,22 +4300,22 @@ main(int32_t argc, char **argv) {
     );
 
     for (int32_t i = 0; i < argc; i++) {
-        if (lg_strcmp(args[i], lg_str8_lit("--dump-ast")) == 0) {
+        if (ak_strcmp(args[i], ak_str8_lit("--dump-ast")) == 0) {
             mrv_ast_dump(&ast, &libc_writer, text);
             ret_code = 0;
             goto out_destroy_ldesc;
-        } else if (lg_strcmp(args[i], lg_str8_lit("--dump-istreams")) == 0) {
-            LG_TableIter iter = {0};
-            lg_table_iter_init(&iter, &ldesc.table);
+        } else if (ak_strcmp(args[i], ak_str8_lit("--dump-istreams")) == 0) {
+            AK_TableIter iter = {0};
+            ak_table_iter_init(&iter, &ldesc.table);
 
             size_t idx;
-            while (lg_table_iter_advance(&iter, &idx, NULL)) {
+            while (ak_table_iter_advance(&iter, &idx, NULL)) {
                 MRV_LanguageDescriptorEntry entry = ldesc.entries[idx];
                 if (entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
                     continue;
                 }
 
-                lg_printf(&libc_writer, lg_str8_lit("\nInstruction Stream of Combinator %{str}:\n"), entry.name);
+                ak_printf(&libc_writer, ak_str8_lit("\nInstruction Stream of Combinator %{str}:\n"), entry.name);
 
                 mrv_istream_dump(&entry.as.combinator.istream, &libc_writer, &ldesc, text);
             }
@@ -4333,9 +4333,9 @@ out_destroy_ldesc:
     mrv_tstream_destroy(&tstream, libc_allocator);
     fclose(file);
 out_free_all:
-    lg_arena_free_all(&scratch_allocator);
+    ak_arena_free_all(&scratch_allocator);
     return ret_code;
 }
 
-#define LIBGRAD_IMPLEMENTATION
-#include <libgrad/libgrad.h>
+#define AKIMBO_IMPLEMENTATION
+#include <akimbo/akimbo.h>

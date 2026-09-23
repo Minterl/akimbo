@@ -1,6 +1,6 @@
 // TODO: once the rest of the lib builds, just use the main header
-#include "libgrad/internal/core.h"
-#include <libgrad/internal/strings.h>
+#include "akimbo/internal/core.h"
+#include <akimbo/internal/strings.h>
 
 #ifndef TEST_IMPLEMENTATION
 #define TEST_IMPLEMENTATION
@@ -9,7 +9,7 @@
 
 #include <stdio.h>
 
-size_t write_to_stdout(void *ctx, const lg_str8 str) {
+size_t write_to_stdout(void *ctx, const ak_str8 str) {
     (void)ctx;
     size_t i = 0;
     for (; i < str.len; i++) {
@@ -18,18 +18,18 @@ size_t write_to_stdout(void *ctx, const lg_str8 str) {
     return i;
 }
 
-static LG_Writer stdout_writer = {
+static AK_Writer stdout_writer = {
     .write = write_to_stdout,
 };
 
 test_status test_printf() {
-    test_assert(lg_printf(&stdout_writer, lg_str8_lit("asdf: %{i64}\n"), 13) == LG_StatusKind_OK, "int failed to print");
-    test_assert(lg_printf(&stdout_writer, lg_str8_lit("asdf: %{str}\n"), lg_str8_lit("asdfasdf")) == LG_StatusKind_OK, "string failed to print");
-    test_assert(lg_printf(&stdout_writer, lg_str8_lit("asdf: %{status}\n"), LG_StatusKind_Overflow) == LG_StatusKind_OK, "status failed to print");
-    test_assert(lg_printf(&stdout_writer, lg_str8_lit("asdf: %{cstr}\n"), "asdfasdf") == LG_StatusKind_OK, "cstring failed to print");
-    test_assert(lg_printf(&stdout_writer, lg_str8_lit("asdf: %{cstr\n"), "asdfasdf") == LG_StatusKind_InvalidArgument, "unterminated fmtspec didn't fail");
+    test_assert(ak_printf(&stdout_writer, ak_str8_lit("asdf: %{i64}\n"), 13) == AK_StatusKind_OK, "int failed to print");
+    test_assert(ak_printf(&stdout_writer, ak_str8_lit("asdf: %{str}\n"), ak_str8_lit("asdfasdf")) == AK_StatusKind_OK, "string failed to print");
+    test_assert(ak_printf(&stdout_writer, ak_str8_lit("asdf: %{status}\n"), AK_StatusKind_Overflow) == AK_StatusKind_OK, "status failed to print");
+    test_assert(ak_printf(&stdout_writer, ak_str8_lit("asdf: %{cstr}\n"), "asdfasdf") == AK_StatusKind_OK, "cstring failed to print");
+    test_assert(ak_printf(&stdout_writer, ak_str8_lit("asdf: %{cstr\n"), "asdfasdf") == AK_StatusKind_InvalidArgument, "unterminated fmtspec didn't fail");
     test_assert(
-        lg_printf(&stdout_writer, lg_str8_lit("asdf: %{i64} %{cstr}\n"), 14, "asdfasdf") == LG_StatusKind_OK,
+        ak_printf(&stdout_writer, ak_str8_lit("asdf: %{i64} %{cstr}\n"), 14, "asdfasdf") == AK_StatusKind_OK,
         "mixed failed to print"
     );
     return TEST_STATUS_OK;
@@ -40,5 +40,5 @@ int main() {
     return 0;
 }
 
-#include <libgrad/internal/strings.c>
-#include <libgrad/internal/debug.c>
+#include <akimbo/internal/strings.c>
+#include <akimbo/internal/debug.c>

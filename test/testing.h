@@ -1,5 +1,5 @@
-#ifndef LG_TESTING_H_
-#define LG_TESTING_H_
+#ifndef AK_TESTING_H_
+#define AK_TESTING_H_
 
 #include <stdio.h>
 
@@ -42,7 +42,7 @@ typedef enum test_status {
 
 void __test_assert_fail(const char *cond_str, const char *file, int line, const char *fmt, ...);
 
-#endif // LG_TESTING_H_
+#endif // AK_TESTING_H_
 
 #ifdef TEST_IMPLEMENTATION
 #undef TEST_IMPLEMENTATION

@@ -14,10 +14,10 @@ type ScalarExpression;
 
 type LoopBody = Lambda ((), Coordinate);
 
-operator IntroduceDomain (host: << LG_Polyhedron >>) -> Domain;
-operator IntroduceAffineTransform (host: << LG_AffineTransform >>) -> AffineTransform;
-operator IntroduceAffineAddressOperator (host: << LG_AffineTransform >>) -> AffineAddressOperator;
-operator IntroduceScalarExpression (host: << LG_ScalarExpression >>) -> ScalarExpression;
+operator IntroduceDomain (host: << AK_Polyhedron >>) -> Domain;
+operator IntroduceAffineTransform (host: << AK_AffineTransform >>) -> AffineTransform;
+operator IntroduceAffineAddressOperator (host: << AK_AffineTransform >>) -> AffineAddressOperator;
+operator IntroduceScalarExpression (host: << AK_ScalarExpression >>) -> ScalarExpression;
 
 operator ApplyAffineTransform (coord: Coordinate, atran: AffineTransform) -> Coordinate;
 operator ApplyAffineAddressOperator (addr_op: AffineAddressOperator, coord: Coordinate) -> Address;
@@ -31,17 +31,17 @@ operator YieldAccumulate (addr: Address, val: Scalar);
 operator For (iteration_domain: Domain, loop_body: LoopBody);
 
 combinator BinaryReduction (
-    iteration_domain: << LG_Polyhedron >>,
+    iteration_domain: << AK_Polyhedron >>,
 
-    y_atran:  << LG_AffineTransform >>,
-    x0_atran: << LG_AffineTransform >>,
-    x1_atran: << LG_AffineTransform >>,
+    y_atran:  << AK_AffineTransform >>,
+    x0_atran: << AK_AffineTransform >>,
+    x1_atran: << AK_AffineTransform >>,
 
-    y_address_op:  << LG_AffineTransform >>,
-    x0_address_op: << LG_AffineTransform >>,
-    x1_address_op: << LG_AffineTransform >>,
+    y_address_op:  << AK_AffineTransform >>,
+    x0_address_op: << AK_AffineTransform >>,
+    x1_address_op: << AK_AffineTransform >>,
 
-    scalar_expression: << LG_ScalarExpression >>,
+    scalar_expression: << AK_ScalarExpression >>,
 ) {
     %D: Domain = IntroduceDomain(iteration_domain);
 

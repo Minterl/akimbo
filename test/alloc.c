@@ -1,4 +1,4 @@
-#include <libgrad/internal/alloc.h>
+#include <akimbo/internal/alloc.h>
 
 #ifndef TEST_IMPLEMENTATION
 #define TEST_IMPLEMENTATION
@@ -18,24 +18,24 @@ void free_libc(void* _, void *ptr) {
     return free(ptr);
 }
 
-static LG_Allocator libc_alloc = {
+static AK_Allocator libc_alloc = {
     .alloc = alloc_libc,
     .free = free_libc,
     .default_slab_size_bytes = 128,
 };
 
 test_status test_alloc() {
-    LG_Arena arena;
-    lg_arena_init(&arena, &libc_alloc);
+    AK_Arena arena;
+    ak_arena_init(&arena, &libc_alloc);
 
-    LG_Scope scope = lg_push_scope(&arena);
-    lg_arena_alloc(&arena, 32, 16);
-    lg_arena_alloc(&arena, 12, 16);
-    lg_pop_scope(&arena, scope);
-    lg_arena_alloc(&arena, 2, 16);
-    lg_arena_alloc(&arena, 256, 16);
-    lg_arena_free_all(&arena);
-    lg_arena_free_recycled(&arena);
+    AK_Scope scope = ak_push_scope(&arena);
+    ak_arena_alloc(&arena, 32, 16);
+    ak_arena_alloc(&arena, 12, 16);
+    ak_pop_scope(&arena, scope);
+    ak_arena_alloc(&arena, 2, 16);
+    ak_arena_alloc(&arena, 256, 16);
+    ak_arena_free_all(&arena);
+    ak_arena_free_recycled(&arena);
 
     test_assert(arena.current_offset == 0, "current offset must have been reset");
     test_assert(arena.recycled_slabs_head == NULL, "there must be no recycled slabs left");
@@ -48,5 +48,5 @@ int main() {
     test_run(alloc);
 }
 
-#include <libgrad/internal/alloc.c>
-#include <libgrad/internal/debug.c>
+#include <akimbo/internal/alloc.c>
+#include <akimbo/internal/debug.c>

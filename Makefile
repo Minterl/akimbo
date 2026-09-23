@@ -2,8 +2,8 @@ CFLAGS = \
 	-Wall -Werror -Wextra -g -std=c99 \
 	-Iinclude \
 	-Itest \
-	-DLG_SAFE \
-	-DLG_DEBUG
+	-DAK_SAFE \
+	-DAK_DEBUG
 
 .PHONY: test
 test:
@@ -66,8 +66,8 @@ tools/mirv:
 		-Wall -Werror -Wextra -g -std=gnu11 \
 		-Iinclude \
 		-Itest \
-		-DLG_SAFE \
-		-DLG_DEBUG \
+		-DAK_SAFE \
+		-DAK_DEBUG \
 		-Iexamples/include \
 		-fsanitize=address \
 		-fsanitize=bounds \

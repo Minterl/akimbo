@@ -1,8 +1,8 @@
-#include <libgrad/internal/core.h>
-#include <libgrad/internal/debug.h>
+#include <akimbo/internal/core.h>
+#include <akimbo/internal/debug.h>
 
 size_t 
-lg_desc_size_in_bytes(LG_StridedDesc desc) {
+ak_desc_size_in_bytes(AK_StridedDesc desc) {
     if (desc.rank == 0) {
         return 0;
     }
@@ -14,11 +14,11 @@ lg_desc_size_in_bytes(LG_StridedDesc desc) {
         }
     }
 
-    return (max_offset + 1) * sizeof(lg_scalar);
+    return (max_offset + 1) * sizeof(ak_scalar);
 }
 
 void 
-lg_copy_vector_to_axis(LG_StridedDesc desc, lg_scalar *restrict dest, const lg_scalar *vector, size_t copy_to_dim) {
+ak_copy_vector_to_axis(AK_StridedDesc desc, ak_scalar *restrict dest, const ak_scalar *vector, size_t copy_to_dim) {
     size_t dim_offset = 0;
     for (size_t i = 0; i < copy_to_dim; i++) {
         dim_offset += desc.dim[i];
@@ -29,16 +29,16 @@ lg_copy_vector_to_axis(LG_StridedDesc desc, lg_scalar *restrict dest, const lg_s
     }
 }
 
-LG_StatusKind 
-lg_desc_compute_strides(LG_StridedDesc *desc, LG_LayoutKind layout, size_t unit_align) {
-#ifdef LG_SAFE
-    if (desc->rank > LG_MAX_RANK) {
-        return LG_StatusKind_InvalidRank;
+AK_StatusKind 
+ak_desc_compute_strides(AK_StridedDesc *desc, AK_LayoutKind layout, size_t unit_align) {
+#ifdef AK_SAFE
+    if (desc->rank > AK_MAX_RANK) {
+        return AK_StatusKind_InvalidRank;
     }
-#endif // LG_SAFE
+#endif // AK_SAFE
     size_t last_stride = 1;
     for (size_t i = 1; i <= desc->rank; i++) {
-        size_t axis = layout == LG_LayoutKind_RowMajor ? desc->rank - i : i - 1;
+        size_t axis = layout == AK_LayoutKind_RowMajor ? desc->rank - i : i - 1;
         desc->strides[axis] = last_stride;
         last_stride *= desc->dim[desc->rank - i];
         // Conceptually, we only pad the rightmost dimension.
@@ -49,11 +49,11 @@ lg_desc_compute_strides(LG_StridedDesc *desc, LG_LayoutKind layout, size_t unit_
         }
     }
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
 bool 
-lg_desc_is_isotropic(LG_StridedDesc desc) {
+ak_desc_is_isotropic(AK_StridedDesc desc) {
     switch (desc.rank) {
     // All vectors are anisotropic.
     case 2:
@@ -75,7 +75,7 @@ lg_desc_is_isotropic(LG_StridedDesc desc) {
 }
 
 void 
-lg_desc_left_pad_axes(LG_StridedDesc **descs, size_t n_descs) {
+ak_desc_left_pad_axes(AK_StridedDesc **descs, size_t n_descs) {
     size_t max_rank = 0;
     for (size_t i = 0; i < n_descs; i++) {
         if (descs[i]->rank > max_rank) {
@@ -100,10 +100,10 @@ lg_desc_left_pad_axes(LG_StridedDesc **descs, size_t n_descs) {
     }
 }
 
-LG_StatusKind 
-lg_infer_broadcasted_dims(
-    LG_LogicalShape *lg_nullable out,
-    const LG_LogicalShape **shapes,
+AK_StatusKind 
+ak_infer_broadcasted_dims(
+    AK_LogicalShape *ak_nullable out,
+    const AK_LogicalShape **shapes,
     size_t n_descs
 ) {
     size_t max_rank = 0;
@@ -124,7 +124,7 @@ lg_infer_broadcasted_dims(
     // 2) One of the dimensions is 1.
     // 3) One of the dimensions does not exist.
     
-    size_t master_dim[LG_MAX_RANK];
+    size_t master_dim[AK_MAX_RANK];
     for (size_t i = 0; i < max_rank; i++) {
         master_dim[i] = 1;
     }
@@ -139,33 +139,33 @@ lg_infer_broadcasted_dims(
             if (*dim_master == 1) {
                 *dim_master = dim_desc;
             } else if (*dim_master != dim_desc) {
-                return LG_StatusKind_ShapeMismatch;
+                return AK_StatusKind_ShapeMismatch;
             }
         }
     }
 
     if (out != NULL) {
         out->rank = max_rank;
-        for (size_t i = 0; i < LG_MAX_RANK; i++) {
+        for (size_t i = 0; i < AK_MAX_RANK; i++) {
             out->dim[i] = master_dim[i];
         }
     }
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 } 
 
-LG_StatusKind 
-lg_create_broadcast_space(LG_StridedDesc **descs, size_t n_descs) {
-    LG_LogicalShape y;
-    LG_StatusKind status = lg_infer_broadcasted_dims(&y, (const LG_LogicalShape**)descs, n_descs);
-    if (status != LG_StatusKind_OK) {
+AK_StatusKind 
+ak_create_broadcast_space(AK_StridedDesc **descs, size_t n_descs) {
+    AK_LogicalShape y;
+    AK_StatusKind status = ak_infer_broadcasted_dims(&y, (const AK_LogicalShape**)descs, n_descs);
+    if (status != AK_StatusKind_OK) {
         return status;
     }
 
     const size_t max_rank = y.rank;
     const size_t *const restrict master_dim = y.dim;
 
-    lg_desc_left_pad_axes(descs, n_descs);
+    ak_desc_left_pad_axes(descs, n_descs);
     
     // Since we know all of the tensors are broadcast-compatible, and their
     // dims/strides are all in the same order, we can pre-bake broadcasting into the
@@ -190,19 +190,19 @@ lg_create_broadcast_space(LG_StridedDesc **descs, size_t n_descs) {
     // - The only thing that changes between tensor views is
     //   striding.
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
-LG_StatusKind 
-lg_infer_contracted_dims(
-    LG_LogicalShape *lg_nullable out_y,
-    const LG_LogicalShape *x0,
-    const LG_LogicalShape *x1,
+AK_StatusKind 
+ak_infer_contracted_dims(
+    AK_LogicalShape *ak_nullable out_y,
+    const AK_LogicalShape *x0,
+    const AK_LogicalShape *x1,
     size_t n_contracted_axes,
     size_t n_batch_axes
 ) {
     if (x0->rank < n_contracted_axes || n_contracted_axes + n_batch_axes > x1->rank) {
-        return LG_StatusKind_InvalidArgument;
+        return AK_StatusKind_InvalidArgument;
     }
 
     // repeated below
@@ -211,7 +211,7 @@ lg_infer_contracted_dims(
 
     size_t rank = 0;
 
-    size_t dim[LG_MAX_RANK] = {0};
+    size_t dim[AK_MAX_RANK] = {0};
     for (size_t i = n_batch_axes; i < x0_first_contracted_axis; i++, rank++) {
         dim[rank] = x0->dim[i];
     }
@@ -226,14 +226,14 @@ lg_infer_contracted_dims(
         }
     }
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
-LG_StatusKind 
-lg_create_contraction_space(
-    LG_StridedDesc *y,
-    LG_StridedDesc *x0,
-    LG_StridedDesc *x1,
+AK_StatusKind 
+ak_create_contraction_space(
+    AK_StridedDesc *y,
+    AK_StridedDesc *x0,
+    AK_StridedDesc *x1,
     size_t n_batch_axes
 ) {
     if (
@@ -241,7 +241,7 @@ lg_create_contraction_space(
         n_batch_axes > x0->rank ||
         n_batch_axes > x1->rank
     ) {
-        return LG_StatusKind_InvalidArgument;
+        return AK_StatusKind_InvalidArgument;
     }
 
     // The logical tensor axes will be laid out as follows:
@@ -250,9 +250,9 @@ lg_create_contraction_space(
     //    reg      reg       0         reg        | x0 strides
     //    reg      0         reg       reg        | x1 strides
 
-    LG_StridedDesc y_cpy = *y;
-    LG_StridedDesc x0_cpy = *x0;
-    LG_StridedDesc x1_cpy = *x1;
+    AK_StridedDesc y_cpy = *y;
+    AK_StridedDesc x0_cpy = *x0;
+    AK_StridedDesc x1_cpy = *x1;
     
     // x0.rank = n_batch + n_contracted + x0_free
     // x1.rank = n_batch + n_contracted + x1_free
@@ -262,9 +262,9 @@ lg_create_contraction_space(
     const size_t x0_first_contracted_axis = x0->rank - n_contracted_axes;
     const size_t x1_first_free_axis = n_contracted_axes + n_batch_axes;
 
-    lg_assert(n_contracted_axes < LG_MAX_RANK);
-    lg_assert(x0_first_contracted_axis < LG_MAX_RANK);
-    lg_assert(x1_first_free_axis < LG_MAX_RANK);
+    ak_assert(n_contracted_axes < AK_MAX_RANK);
+    ak_assert(x0_first_contracted_axis < AK_MAX_RANK);
+    ak_assert(x1_first_free_axis < AK_MAX_RANK);
 
     // Batch axes are already in place
     size_t r = n_batch_axes;
@@ -276,7 +276,7 @@ lg_create_contraction_space(
         x1->dim[r] = x0_cpy.dim[i];
         x1->strides[r] = 0;
         if (y->dim[r] != x0_cpy.dim[i]) {
-            return LG_StatusKind_ShapeMismatch;
+            return AK_StatusKind_ShapeMismatch;
         }
         y->strides[r] = y_cpy.strides[r];
     }
@@ -286,7 +286,7 @@ lg_create_contraction_space(
         x1->dim[r] = x1_cpy.dim[i];
         x1->strides[r] = x1_cpy.strides[i];
         if (y->dim[r] != x1_cpy.dim[i]) {
-            return LG_StatusKind_ShapeMismatch;
+            return AK_StatusKind_ShapeMismatch;
         }
         y->strides[r] = y_cpy.strides[r];
     }
@@ -311,11 +311,11 @@ lg_create_contraction_space(
     x0->rank = r;
     x1->rank = r;
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
-LG_StatusKind 
-lg_sort_axes(LG_StridedDesc **descs, size_t n_descs) {
+AK_StatusKind 
+ak_sort_axes(AK_StridedDesc **descs, size_t n_descs) {
     size_t max_rank = 0;
     for (size_t i = 0; i < n_descs; i++) {
         if (descs[i]->rank > max_rank) {
@@ -346,11 +346,11 @@ lg_sort_axes(LG_StridedDesc **descs, size_t n_descs) {
         }
     }
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
-LG_StatusKind 
-lg_coalesce_axes(LG_StridedDesc **descs, size_t n_descs) {
+AK_StatusKind 
+ak_coalesce_axes(AK_StridedDesc **descs, size_t n_descs) {
     size_t max_rank = 0;
     for (size_t i = 0; i < n_descs; i++) {
         if (descs[i]->rank > max_rank) {
@@ -406,11 +406,11 @@ lg_coalesce_axes(LG_StridedDesc **descs, size_t n_descs) {
         }
     }
 
-    return LG_StatusKind_OK;
+    return AK_StatusKind_OK;
 }
 
 bool 
-lg_nditer_increment(LG_NDIter *iter, size_t axis) {
+ak_nditer_increment(AK_NDIter *iter, size_t axis) {
     const size_t rank = iter->descs[0].rank;
     const size_t first_tracked_dim = rank - iter->n_tracked_dims;
     const size_t *restrict dim = iter->descs[0].dim;
@@ -424,13 +424,13 @@ lg_nditer_increment(LG_NDIter *iter, size_t axis) {
         axis--;
         iter->coords[axis]++;
         if (iter->coords[axis] < dim[axis]) {
-            for (size_t i = 0; i < LG_N_TRACKED_TENSORS; i++) {
+            for (size_t i = 0; i < AK_N_TRACKED_TENSORS; i++) {
                 iter->indices[i] += iter->descs[i].strides[axis];
             }
             return true; 
         }
         iter->coords[axis] = 0;
-        for (size_t i = 0; i < LG_N_TRACKED_TENSORS; i++) {
+        for (size_t i = 0; i < AK_N_TRACKED_TENSORS; i++) {
             iter->indices[i] -= iter->descs[i].strides[axis] * (dim[axis] - 1);
         }
     }
@@ -439,12 +439,12 @@ lg_nditer_increment(LG_NDIter *iter, size_t axis) {
 }
 
 void 
-lg_nditer_goto(LG_NDIter *iter, size_t *coords) {
+ak_nditer_goto(AK_NDIter *iter, size_t *coords) {
     for(size_t i = 0; i < iter->n_tracked_dims; i++) {
         iter->coords[i] = coords[i];
     }
 
-    for (size_t i = 0; i < LG_N_TRACKED_TENSORS; i++) {
+    for (size_t i = 0; i < AK_N_TRACKED_TENSORS; i++) {
         iter->indices[i] = 0;
         for (size_t j = 0; j < iter->n_tracked_dims; j++) {
             iter->indices[i] += iter->descs[i].strides[j] * coords[j];
