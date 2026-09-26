@@ -4202,6 +4202,12 @@ write_stdout(void *ctx, ak_str8 msg) {
     return printf("%.*s", (int32_t)msg.len, msg.p);
 }
 
+size_t
+write_stderr(void *ctx, ak_str8 msg) {
+    (void)ctx;
+    return fprintf(stderr, "%.*s", (int32_t)msg.len, msg.p);
+}
+
 static AK_Allocator 
 libc_allocator = {
     .f = libc_allocator_f,
@@ -4210,6 +4216,11 @@ libc_allocator = {
 static AK_Writer 
 libc_writer = {
     .write = write_stdout,
+};
+
+static AK_Writer 
+libc_err_writer = {
+    .write = write_stderr,
 };
 
 int 
@@ -4240,14 +4251,14 @@ main(int32_t argc, char **argv) {
     ak_assert(chunks_read > 0);
 
     ak_str8 text = (ak_str8){ .len = 4096, .p = file_contents };
-    MRV_TokenStream tstream = mrv_lex(libc_allocator, text, &libc_writer);
+    MRV_TokenStream tstream = mrv_lex(libc_allocator, text, &libc_err_writer);
 
     (void)text;
 
     MRV_AST ast = mrv_parse(
         libc_allocator,
         &scratch_allocator,
-        &libc_writer,
+        &libc_err_writer,
         &tstream,
         text
     );
@@ -4258,7 +4269,7 @@ main(int32_t argc, char **argv) {
         &scratch_allocator,
         &ast,
         text,
-        &libc_writer,
+        &libc_err_writer,
         &ldesc
     );
 
@@ -4277,9 +4288,7 @@ main(int32_t argc, char **argv) {
                 if (entry.kind != MRV_LanguageDescriptorEntryKind_Combinator) {
                     continue;
                 }
-
                 ak_printf(&libc_writer, ak_str8_lit("\nInstruction Stream of Combinator %{str}:\n"), entry.name);
-
                 mrv_istream_dump(&entry.as.combinator.istream, &libc_writer, &ldesc, text);
             }
 
