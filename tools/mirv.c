@@ -950,7 +950,8 @@ mrv_parse_decl_arg(MRV_ParserContext *ctx) {
     peek = mrv_parser_peek(ctx);
     if (peek.kind == MRV_TokenKind_BeginHostType) {
         mrv_parser_consume(ctx);
-        type = mrv_parse_host_type_ident(ctx);
+        mrv_report_error(&ctx->err, peek.span, ak_str8_lit("unexpected token \"<<\"\nhost types are not allowed here"));
+        type = mrv_parser_nil_node(ctx);
     } else {
         type = mrv_parse_other_ident(ctx);
     }
@@ -1242,9 +1243,19 @@ mrv_parse_language_decl(MRV_ParserContext *ctx) {
 
 MRV_ASTNode*
 mrv_parse_non_trivial_type(MRV_ParserContext *ctx) {
-    MRV_ASTNode *outermost_ident = mrv_parse_other_ident(ctx);
-    mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
-    MRV_ASTNode *arg_list = mrv_parse_invocation_arg_list(ctx);
+    MRV_ASTNode *outermost_ident = mrv_parser_nil_node(ctx);
+    MRV_ASTNode *arg_list = mrv_parser_nil_node(ctx);
+
+    MRV_Token peek = mrv_parser_peek(ctx);
+    if (peek.kind == MRV_TokenKind_BeginHostType) {
+        mrv_parser_consume(ctx);
+        outermost_ident = mrv_parse_host_type_ident(ctx);
+    } else {
+        outermost_ident = mrv_parse_other_ident(ctx);
+        mrv_parser_expect(ctx, MRV_TokenKind_OpenParen);
+        arg_list = mrv_parse_invocation_arg_list(ctx);
+    }
+
     MRV_Span all_span = mrv_get_bounding_span(ctx, 2, (MRV_ASTNode*[]){outermost_ident, arg_list});
     MRV_ASTNode *node = mrv_parser_mknode(
         ctx,
@@ -1253,6 +1264,7 @@ mrv_parse_non_trivial_type(MRV_ParserContext *ctx) {
         .outermost_ident = outermost_ident,
         .invocation_arg_list = arg_list,
     );
+
     return node;
 }
 
@@ -1653,8 +1665,6 @@ MRV_LanguageDescriptorRef {
     uint32_t donttouchme;
 } MRV_LanguageDescriptorRef;
 
-ak_static_assert(sizeof(MRV_LanguageDescriptorRef) == 4);
-
 typedef struct
 MRV_Inst_Invocation {
     MRV_Symbol                 new_symbol;
@@ -1708,7 +1718,7 @@ enum
 MRV_TypeKind {
     MRV_TypeKind_Nominal,
     MRV_TypeKind_Lambda,
-    MRV_TypeKind_Host,
+    MRV_TypeKind_HostAlias,
 };
 
 typedef uint8_t
@@ -1729,10 +1739,17 @@ MRV_LanguageDescriptorEntry {
         struct {
             MRV_TypeKind type_kind;
 
-            /// the following are only active in the case that this is a lambda
-            MRV_LanguageDescriptorRef return_type;
-            MRV_LanguageDescriptorRef left_arg_type;
-            MRV_LanguageDescriptorRef right_arg_type;
+            union {
+                struct {
+                    MRV_LanguageDescriptorRef return_type;
+                    MRV_LanguageDescriptorRef left_arg_type;
+                    MRV_LanguageDescriptorRef right_arg_type;
+                } lambda;
+
+                struct {
+                    ak_str8 aliases;
+                } host_alias;
+            } as;
         } type;
 
         struct {
@@ -2122,8 +2139,14 @@ mrv_sema_traverse_children(
     }
 
     case MRV_ASTNodeKind_NonTrivialType: {
-        ak_assert(as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_OtherIdent);
-        ak_assert(as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_InvocationArgList);
+        ak_assert(
+            as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_OtherIdent ||
+            as.NonTrivialType.outermost_ident->kind == MRV_ASTNodeKind_HostTypeIdent
+        );
+        ak_assert(
+            as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_InvocationArgList ||
+            as.NonTrivialType.invocation_arg_list->kind == MRV_ASTNodeKind_Error
+        );
         next(ctx, as.NonTrivialType.outermost_ident);
         next(ctx, as.NonTrivialType.invocation_arg_list);
         break;
@@ -2241,25 +2264,6 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         break;
     }
 
-    case MRV_ASTNodeKind_HostTypeIdent: {
-        ak_str8 ident = mrv_span_to_str8(self->span, ctx->text);
-
-        size_t idx;
-        AK_StatusKind status = ak_table_ensure_str8(
-            &ctx->ldesc.table,
-            ident,
-            &idx,
-            NULL
-        );
-        ak_assert(status == AK_StatusKind_OK);
-
-        ctx->ldesc.entries[idx].name = ident;
-        ctx->ldesc.entries[idx].kind = MRV_LanguageDescriptorEntryKind_Type;
-        ctx->ldesc.entries[idx].as.type.type_kind = MRV_TypeKind_Host;
-
-        break;
-    }
-
     // we'll also take this opportunity to record the language name
     case MRV_ASTNodeKind_LanguageDeclaration: {
         ak_str8 language_name = mrv_span_to_str8(as.LanguageDeclaration.ident->span, ctx->text);
@@ -2278,7 +2282,13 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         MRV_TypeKind type_kind;
         if (as.TypeDeclaration.non_trivial_alias->kind == MRV_ASTNodeKind_NonTrivialType) {
-            type_kind = MRV_TypeKind_Lambda;
+            MRV_ASTNodeKind outermost_kind = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.outermost_ident->kind;
+            if (outermost_kind == MRV_ASTNodeKind_HostTypeIdent) {
+                type_kind = MRV_TypeKind_HostAlias;
+            } else {
+                ak_assert(outermost_kind == MRV_ASTNodeKind_OtherIdent);
+                type_kind = MRV_TypeKind_Lambda;
+            }
         } else {
             type_kind = MRV_TypeKind_Nominal;
         }
@@ -2355,15 +2365,19 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 }
 
                 if (i == 0) {
-                    ctx->ldesc.entries[idx].as.type.return_type = ldesc_ref;
+                    ctx->ldesc.entries[idx].as.type.as.lambda.return_type = ldesc_ref;
                 } else if (i == 1) {
-                    ctx->ldesc.entries[idx].as.type.left_arg_type = ldesc_ref;
+                    ctx->ldesc.entries[idx].as.type.as.lambda.left_arg_type = ldesc_ref;
                 } else if (i == 2) {
-                    ctx->ldesc.entries[idx].as.type.right_arg_type = ldesc_ref;
+                    ctx->ldesc.entries[idx].as.type.as.lambda.right_arg_type = ldesc_ref;
                 } else {
                     ak_unreachable();
                 }
             }
+        } else if (type_kind == MRV_TypeKind_HostAlias) {
+            MRV_ASTNode *alias_host_ident = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.outermost_ident;
+            ak_str8 ident_str = mrv_span_to_str8(alias_host_ident->span, ctx->text);
+            ctx->ldesc.entries[idx].as.type.as.host_alias.aliases = ident_str;
         }
 
         ctx->ldesc.entries[idx].name = ident;
@@ -2710,7 +2724,7 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
 
         mrv_nrstack_pop_scope(&state->nrstack);
 
-        uint32_t len = state->istream->len - lambda_inst_idx;
+        uint32_t len = state->istream->len - lambda_inst_idx - n_args;
         state->istream->insts[lambda_inst_idx].as.lambda.body_len = len;
 
         break;
@@ -2917,8 +2931,6 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
                 .type = type_ref,
                 .scope_depth = mrv_nrstack_get_scope_depth(&state->nrstack),
             };
-            state->istream->symtab[sym.id].ident_span = arg_ident_span;
-            state->istream->symtab[sym.id].type = type_ref;
         }
     }
 
@@ -3081,7 +3093,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 MRV_LanguageDescriptorRef type = istream->symtab[new_symbol.id].type;
                 const MRV_LanguageDescriptorEntry *const type_entry = &ctx->ldesc.entries[mrv_ldesc_ref_get_idx(type)];
 
-                if (mrv_ldesc_ref_is_valid(type_entry->as.type.left_arg_type)) {
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.as.lambda.left_arg_type)) {
                     MRV_Span span = istream->symtab[new_symbol.id].ident_span;
                     ak_str8 ident = mrv_span_to_str8(span, ctx->text);
 
@@ -3101,7 +3113,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                     MRV_Symbol arg_sym = istream->insts[i + 1].as.arg.sym;
                     ak_assert(arg_sym.id != 0);
 
-                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.left_arg_type;
+                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.as.lambda.left_arg_type;
                     MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
 
                     if (!mrv_ldesc_ref_eq(want_arg_type, got_arg_type)) {
@@ -3118,7 +3130,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                         goto again;
                     }
                 }
-                if (mrv_ldesc_ref_is_valid(type_entry->as.type.right_arg_type)) {
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.as.lambda.right_arg_type)) {
                     MRV_Span span = istream->symtab[new_symbol.id].ident_span;
                     ak_str8 ident = mrv_span_to_str8(span, ctx->text);
 
@@ -3138,7 +3150,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                     MRV_Symbol arg_sym = istream->insts[i + 2].as.arg.sym;
                     ak_assert(arg_sym.id != 0);
 
-                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.right_arg_type;
+                    MRV_LanguageDescriptorRef want_arg_type = type_entry->as.type.as.lambda.right_arg_type;
                     MRV_LanguageDescriptorRef got_arg_type = istream->symtab[arg_sym.id].type;
 
                     if (!mrv_ldesc_ref_eq(want_arg_type, got_arg_type)) {
@@ -3156,7 +3168,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                     }
                 }
 
-                if (mrv_ldesc_ref_is_valid(type_entry->as.type.return_type)) {
+                if (mrv_ldesc_ref_is_valid(type_entry->as.type.as.lambda.return_type)) {
                     ak_unreachable("TODO: there may not even be a need for this yet");
                 }
 
@@ -3331,8 +3343,6 @@ mrv_strlist_newline_indent(
 
 ak_str8
 mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, ak_str8 name) {
-    AK_StatusKind status = AK_StatusKind_OK;
-
     bool found;
     size_t idx = ak_table_get_str8(&ctx->ldesc->table, name, &found);
     ak_assert(found);
@@ -3342,26 +3352,13 @@ mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, ak_str8 name) {
     ak_assert(entry.kind == MRV_LanguageDescriptorEntryKind_Type);
 
     ak_str8 cat = {0};
-    if (
-        entry.as.type.type_kind == MRV_TypeKind_Nominal || 
-        entry.as.type.type_kind == MRV_TypeKind_Lambda
-    ) {
-        status = ak_strcat(ctx->scratch, (ak_str8[]){
-            ak_str8_lit("AK_"),
-            ctx->ldesc->language_name,
-            ak_str8_lit("Symbol_"),
-            entry.name,
-        }, 4, &cat);
-        ak_assert(status == AK_StatusKind_OK);
-    } else if (entry.as.type.type_kind == MRV_TypeKind_Host) {
-        status = ak_strcat(ctx->scratch, (ak_str8[]){
-            entry.name,
-            ak_str8_lit(" *"),
-        }, 2, &cat);
-        ak_assert(status == AK_StatusKind_OK);
-    } else {
-        ak_unreachable();
-    }
+    AK_StatusKind status = ak_strcat(ctx->scratch, (ak_str8[]){
+        ak_str8_lit("AK_"),
+        ctx->ldesc->language_name,
+        ak_str8_lit("Symbol_"),
+        entry.name,
+    }, 4, &cat);
+    ak_assert(status == AK_StatusKind_OK);
 
     return cat;
 }
@@ -3451,36 +3448,6 @@ mrv_sg_pascal_to_snake_escaped(AK_Arena *arena, ak_str8 original) {
 }
 
 void
-mrv_sg_type_enum(MRV_SourcegenContext *ctx) {
-    ak_printf(ctx->header_file_writer, ak_str8_lit(
-        "\ntypedef uint8_t\nAK_%{str}Type;"
-        "\nenum\nAK_%{str}Type {"
-    ), ctx->ldesc->language_name, ctx->ldesc->language_name);
-
-    AK_TableIter iter = {0};
-    ak_table_iter_init(&iter, &ctx->ldesc->table);
-
-    size_t idx;
-    while (ak_table_iter_advance(&iter, &idx, NULL)) {
-        MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
-        if (
-            entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
-            entry.as.type.type_kind == MRV_TypeKind_Host
-        ) {
-            continue;
-        }
-
-        ak_printf(
-            ctx->header_file_writer,
-            ak_str8_lit("\n    AK_%{str}Type_%{str},"),
-            ctx->ldesc->language_name, entry.name
-        );
-    }
-
-    ak_write(ctx->header_file_writer, ak_str8_lit("\n};\n"));
-}
-
-void
 mrv_sg_opcode_enum(MRV_SourcegenContext *ctx) {
     ak_printf(ctx->header_file_writer, ak_str8_lit(
         "\ntypedef uint8_t\nAK_%{str}Opcode;"
@@ -3520,10 +3487,7 @@ mrv_sg_symbol_types(MRV_SourcegenContext *ctx) {
     size_t idx;
     while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
-        if (
-            entry.kind != MRV_LanguageDescriptorEntryKind_Type ||
-            entry.as.type.type_kind == MRV_TypeKind_Host
-        ) {
+        if (entry.kind != MRV_LanguageDescriptorEntryKind_Type) {
             continue;
         }
 
@@ -3609,25 +3573,25 @@ mrv_sg_node_types(MRV_SourcegenContext *ctx) {
                 ctx->ldesc->language_name, entry.name
             );
 
-            if (mrv_ldesc_ref_is_valid(entry.as.type.left_arg_type)) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.as.lambda.left_arg_type)) {
                 ak_printf(
                     ctx->header_file_writer,
                     ak_str8_lit("\n    %{str} left_arg;"),
-                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.left_arg_type))
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.as.lambda.left_arg_type))
                 );
             }
-            if (mrv_ldesc_ref_is_valid(entry.as.type.right_arg_type)) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.as.lambda.right_arg_type)) {
                 ak_printf(
                     ctx->header_file_writer,
                     ak_str8_lit("\n    %{str} right_arg;"),
-                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.right_arg_type))
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.as.lambda.right_arg_type))
                 );
             }
-            if (mrv_ldesc_ref_is_valid(entry.as.type.return_type)) {
+            if (mrv_ldesc_ref_is_valid(entry.as.type.as.lambda.return_type)) {
                 ak_printf(
                     ctx->header_file_writer,
                     ak_str8_lit("\n    %{str} return_val;"),
-                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.return_type))
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.type.as.lambda.return_type))
                 );
             }
 
@@ -4034,7 +3998,7 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
 
                 if (mrv_ldesc_ref_is_valid(op_entry.as.operator.left_arg_type)) {
                     MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.left_arg.id].type)].as.type.type_kind;
-                    if (arg_type_kind == MRV_TypeKind_Host) {
+                    if (arg_type_kind == MRV_TypeKind_HostAlias) {
                         ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("redex->"));
                     }
 
@@ -4045,7 +4009,7 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                     ak_strlist_append(&statements, ctx->scratch, ak_str8_lit(", "));
 
                     MRV_TypeKind arg_type_kind = ctx->ldesc->entries[mrv_ldesc_ref_get_idx(istream.symtab[istream.insts[i].as.invocation.right_arg.id].type)].as.type.type_kind;
-                    if (arg_type_kind == MRV_TypeKind_Host) {
+                    if (arg_type_kind == MRV_TypeKind_HostAlias) {
                         ak_strlist_append(&statements, ctx->scratch, ak_str8_lit("redex->"));
                     }
 
@@ -4063,10 +4027,10 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 ak_str8 ret_type_str = mrv_ldesc_get_name(ctx->ldesc, lambda_type);
                 ak_str8 name_str = mrv_span_to_str8(istream.symtab[new_sym.id].ident_span, ctx->text);
                 uint32_t n_args = 0;
-                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.left_arg_type)) {
+                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.as.lambda.left_arg_type)) {
                     n_args++;
                 }
-                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.right_arg_type)) {
+                if (mrv_ldesc_ref_is_valid(ctx->ldesc->entries[mrv_ldesc_ref_get_idx(lambda_type)].as.type.as.lambda.right_arg_type)) {
                     n_args++;
                 }
 
@@ -4188,7 +4152,6 @@ mrv_gen_source(
     );
     ak_write(header_file_writer, ak_str8_lit("\n#include <akimbo/internal/base.h>\n"));
     {
-        mrv_sg_type_enum(&ctx);
         mrv_sg_opcode_enum(&ctx);
         mrv_sg_symbol_types(&ctx);
         mrv_sg_node_types(&ctx);

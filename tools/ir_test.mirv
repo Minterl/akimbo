@@ -6,18 +6,13 @@ type Address;
 type Index;
 type Scalar;
 type Coordinate;
-type Domain;
-type AffineTransform;
-type AffineAddressOperator;
+type Domain = << AK_Polyhedron >>;
+type AffineTransform = << AK_AffineTransform >>;
+type AffineAddressOperator = << AK_AffineTransform >>;
 type ScalarConsPair;
-type ScalarExpression;
+type ScalarExpression = << AK_ScalarExpression >>;
 
 type LoopBody = Lambda ((), Coordinate);
-
-operator IntroduceDomain (host: << AK_Polyhedron >>) -> Domain;
-operator IntroduceAffineTransform (host: << AK_AffineTransform >>) -> AffineTransform;
-operator IntroduceAffineAddressOperator (host: << AK_AffineTransform >>) -> AffineAddressOperator;
-operator IntroduceScalarExpression (host: << AK_ScalarExpression >>) -> ScalarExpression;
 
 operator ApplyAffineTransform (coord: Coordinate, atran: AffineTransform) -> Coordinate;
 operator ApplyAffineAddressOperator (addr_op: AffineAddressOperator, coord: Coordinate) -> Address;
@@ -31,38 +26,26 @@ operator YieldAccumulate (addr: Address, val: Scalar);
 operator For (iteration_domain: Domain, loop_body: LoopBody);
 
 combinator BinaryReduction (
-    iteration_domain: << AK_Polyhedron >>,
+    D: Domain,
 
-    y_atran:  << AK_AffineTransform >>,
-    x0_atran: << AK_AffineTransform >>,
-    x1_atran: << AK_AffineTransform >>,
+    y_atran:  AffineTransform,
+    x0_atran: AffineTransform,
+    x1_atran: AffineTransform,
 
-    y_address_op:  << AK_AffineTransform >>,
-    x0_address_op: << AK_AffineTransform >>,
-    x1_address_op: << AK_AffineTransform >>,
+    y_addr_op:  AffineAddressOperator,
+    x0_addr_op: AffineAddressOperator,
+    x1_addr_op: AffineAddressOperator,
 
-    scalar_expression: << AK_ScalarExpression >>,
+    scalar_expr: ScalarExpression,
 ) {
-    %D: Domain = IntroduceDomain(iteration_domain);
-
-    %y_transform:  AffineTransform = IntroduceAffineTransform(y_atran);
-    %x0_transform: AffineTransform = IntroduceAffineTransform(x0_atran);
-    %x1_transform: AffineTransform = IntroduceAffineTransform(x1_atran);
-
-    %y_addr_op:  AffineAddressOperator = IntroduceAffineAddressOperator(y_address_op);
-    %x0_addr_op: AffineAddressOperator = IntroduceAffineAddressOperator(x0_address_op);
-    %x1_addr_op: AffineAddressOperator = IntroduceAffineAddressOperator(x1_address_op);
-
-    %scalar_expr: ScalarExpression = IntroduceScalarExpression(scalar_expression);
-
     %loop_body: LoopBody = lambda (%induction_vector : Coordinate) {
-        %y_coord:  Coordinate = ApplyAffineTransform(%induction_vector, %y_transform);
+        %y_coord:  Coordinate = ApplyAffineTransform(%induction_vector, %y_atran);
         %y_addr:   Address    = ApplyAffineAddressOperator(%y_addr_op, %y_coord);
 
-        %x0_coord: Coordinate = ApplyAffineTransform(%induction_vector, %x0_transform);
+        %x0_coord: Coordinate = ApplyAffineTransform(%induction_vector, %x0_atran);
         %x0_addr:  Address    = ApplyAffineAddressOperator(%x0_addr_op, %x0_coord);
 
-        %x1_coord: Coordinate = ApplyAffineTransform(%induction_vector, %x1_transform);
+        %x1_coord: Coordinate = ApplyAffineTransform(%induction_vector, %x1_atran);
         %x1_addr:  Address    = ApplyAffineAddressOperator(%x1_addr_op, %x1_coord);
 
         %x0: Scalar = Access(%x0_addr);
