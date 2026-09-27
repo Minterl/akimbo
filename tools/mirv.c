@@ -4209,13 +4209,13 @@ libc_allocator_f(void *ctx, AK_AllocatorModeKind mode_kind, AK_AllocatorModePara
 size_t
 write_stdout(void *ctx, ak_str8 msg) {
     (void)ctx;
-    return printf("%.*s", (int32_t)msg.len, msg.p);
+    return fwrite(msg.p, 1, msg.len, stdout);
 }
 
 size_t
 write_stderr(void *ctx, ak_str8 msg) {
     (void)ctx;
-    return fprintf(stderr, "%.*s", (int32_t)msg.len, msg.p);
+    return fwrite(msg.p, 1, msg.len, stderr);
 }
 
 static AK_Allocator 

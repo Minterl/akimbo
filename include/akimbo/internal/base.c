@@ -195,19 +195,28 @@ AK_StatusKind
 ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
     AK_StatusKind status = AK_StatusKind_OK;
 
+    // this just accumulates bytes until we hit a format specifier or the end of `fmt`
+    // and need to flush them to `writer`.
+    // the alternative to this is creating a 1-byte long string every single
+    // iteration through the loop and flushing it every byte, which is significantly
+    // slower for a multitude of reasons.
+    ak_str8 buf = { .p = fmt.p };
+
     for (size_t i = 0; i < fmt.len; i++) {
         if (
             fmt.p[i] != '%' ||
             (i + 1) >= fmt.len ||
             fmt.p[i + 1] != '{'
         ) {
-            ak_write(writer, ((ak_str8){ .len = 1, .p = fmt.p + i }));
+            buf.len++;
             continue;
         }
 
+        // we found what is hopefully a format specifier.
+        // we'll now flush the slice before this to the stream and 
+        // try to parse said specifier
 
-        ////////////////////////////////////////////////// 
-        // ~~ Parse the format specifier ~~
+        ak_write(writer, buf);
 
         ak_str8 fmtspec;
         {
@@ -225,7 +234,7 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
                         goto out;
                     }
                     fmtspec_end++;
-                }      
+                }
                 i = fmtspec_end; // i will be incremeted at the bottom of the loop
             }
 
@@ -241,9 +250,7 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
             ak_assert((fmtspec.p + fmtspec.len) < (fmt.p + fmt.len));
         }
 
-
-        ////////////////////////////////////////////////// 
-        // ~~ Format specifier LUT lookup ~~
+        // look up whatever we found in the table
         {
             uint32_t hash = ak_hash_16(fmtspec.p, (fmtspec.len < 16 ? fmtspec.len : 16));
             bool found = false;
@@ -259,15 +266,21 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
                 goto out;
             }
         }
-
+        
         ak_assert(i < fmt.len);
+
+        buf.len = 0;
+        buf.p = fmt.p + i + 1;
     }
 
 out:
+    if (buf.len > 0) {
+        ak_write(writer, buf);
+    }
     if (status != AK_StatusKind_OK) {
         ak_write(writer, ak_str8_lit("(error)"));
     }
-    return AK_StatusKind_OK;
+    return status;
 }
 
 typedef struct
