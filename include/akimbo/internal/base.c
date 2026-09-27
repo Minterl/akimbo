@@ -950,7 +950,7 @@ ak_mmh(uint8_t *key, size_t len) {
 
         chunk = ak_mmh_rol(chunk * AK_MMH_C1, 32, AK_MMH_R1);
         chunk *= AK_MMH_C2;
-        hash = AK_MMH_S ^ hash;
+        hash ^= chunk;
         hash = ak_mmh_rol(hash, 32, AK_MMH_R2) * AK_MMH_M + AK_MMH_N;
     }
 

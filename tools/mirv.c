@@ -2995,7 +2995,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "passed left argument %{str} to operator %{str} which does not take one"
                             ), ident, op_name
                         );
-                        goto again;
+                        goto next_inst;
                     }
                     if (!mrv_ldesc_ref_eq(got_left_arg_type, want_left_arg_type)) {
                         ak_str8 op_name = op_entry->name;
@@ -3011,7 +3011,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "wanted %{str}"
                             ), ident, op_name, got_type, want_type
                         );
-                        goto again;
+                        goto next_inst;
                     }
                 }
 
@@ -3030,7 +3030,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "passed right argument %{str} to operator %{str} which does not take one"
                             ), ident, op_name
                         );
-                        goto again;
+                        goto next_inst;
                     }
                     if (!mrv_ldesc_ref_eq(got_right_arg_type, want_right_arg_type)) {
                         ak_str8 op_name = op_entry->name;
@@ -3046,7 +3046,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "wanted %{str}"
                             ), ident, op_name, got_type, want_type
                         );
-                        goto again;
+                        goto next_inst;
                     }
                 }
 
@@ -3065,7 +3065,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "assigned a value %{str} to to the result of the operator %{str}, which does not return a value"
                             ), ident, op_name
                         );
-                        goto again;
+                        goto next_inst;
                     }
                     if (!mrv_ldesc_ref_eq(got_return_val_type, want_return_val_type)) {
                         ak_str8 op_name = op_entry->name;
@@ -3081,7 +3081,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                                 "%{str} actually returns %{str}"
                             ), ident, op_name, got_type, op_name, want_type
                         );
-                        goto again;
+                        goto next_inst;
                     }
                 }
 
@@ -3090,6 +3090,16 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
 
             case MRV_InstKind_Lambda: {
                 MRV_Symbol new_symbol = istream->insts[i].as.lambda.new_symbol;
+
+                // there is one special case to be aware of: the first inst of an istream
+                // the first node of the istream is always lambda, since we begin an istream
+                // by listing args.
+                // in this case, there is no new symbol created, and as such, there isn't anything to check
+                if (new_symbol.id == 0) {
+                    ak_assert(i == 0);
+                    goto next_inst;
+                }
+
                 MRV_LanguageDescriptorRef type = istream->symtab[new_symbol.id].type;
                 const MRV_LanguageDescriptorEntry *const type_entry = &ctx->ldesc.entries[mrv_ldesc_ref_get_idx(type)];
 
@@ -3107,7 +3117,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                             ak_str8_lit("missing the left arg in declaration of lambda %{str} of type %{str}"),
                             ident, type_entry->name
                         );
-                        goto again;
+                        goto next_inst;
                     }
 
                     MRV_Symbol arg_sym = istream->insts[i + 1].as.arg.sym;
@@ -3127,7 +3137,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                             ident, type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, got_arg_type),
                             type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, want_arg_type)
                         );
-                        goto again;
+                        goto next_inst;
                     }
                 }
                 if (mrv_ldesc_ref_is_valid(type_entry->as.type.as.lambda.right_arg_type)) {
@@ -3144,7 +3154,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                             ak_str8_lit("missing the right arg in declaration of lambda %{str} of type %{str}"),
                             ident, type_entry->name
                         );
-                        goto again;
+                        goto next_inst;
                     }
 
                     MRV_Symbol arg_sym = istream->insts[i + 2].as.arg.sym;
@@ -3164,7 +3174,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                             ident, type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, got_arg_type),
                             type_entry->name, mrv_ldesc_get_name(&ctx->ldesc, want_arg_type)
                         );
-                        goto again;
+                        goto next_inst;
                     }
                 }
 
@@ -3175,7 +3185,7 @@ mrv_sema_typecheck_istreams(MRV_SemaContext *ctx) {
                 break;
             }
             }
-again:;
+next_inst:;
         }
     }
 }
