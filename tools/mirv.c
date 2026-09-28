@@ -3481,6 +3481,16 @@ mrv_sg_opcode_enum(MRV_SourcegenContext *ctx) {
                 ak_str8_lit("\n    AK_%{str}Opcode_%{str},"),
                 ctx->ldesc->language_name, entry.name
             );
+        } else if (
+            entry.kind == MRV_LanguageDescriptorEntryKind_Type &&
+            entry.as.type.type_kind == MRV_TypeKind_Lambda
+        ) {
+            ak_printf(
+                ctx->header_file_writer,
+                ak_str8_lit("\n    AK_%{str}Opcode_%{str}Declaration,"),
+                ctx->ldesc->language_name, entry.name
+            );
+
         }
     }
 
@@ -3632,6 +3642,17 @@ mrv_sg_node_union_type(MRV_SourcegenContext *ctx) {
 
             if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
                 ak_printf(ctx->header_file_writer, ak_str8_lit("\n    AK_%{str}Node_%{str} %{str};"), ctx->ldesc->language_name, entry.name, name_snake_case);
+            } else if (
+                entry.kind == MRV_LanguageDescriptorEntryKind_Type &&
+                entry.as.type.type_kind == MRV_TypeKind_Lambda
+            ) {
+                ak_printf(
+                    ctx->header_file_writer,
+                    ak_str8_lit("\n    AK_%{str}Node_%{str}Declaration %{str}_declaration;"),
+                    ctx->ldesc->language_name,
+                    entry.name,
+                    name_snake_case
+                );
             }
 
             ak_pop_scope(ctx->scratch, scope);
@@ -3783,88 +3804,141 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
     while (ak_table_iter_advance(&iter, &idx, NULL)) {
         MRV_LanguageDescriptorEntry entry = ctx->ldesc->entries[idx];
 
-        if (entry.kind != MRV_LanguageDescriptorEntryKind_Operator) {
+        if (
+            entry.kind != MRV_LanguageDescriptorEntryKind_Operator &&
+            (entry.kind != MRV_LanguageDescriptorEntryKind_Type || entry.as.type.type_kind != MRV_TypeKind_Lambda)
+        ) {
             continue;
         }
 
         AK_Scope scope = ak_push_scope(ctx->scratch);
         AK_StatusKind status = AK_StatusKind_OK;
-        ak_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, entry.name);
-        ak_str8 name_snake;
-        status = ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &name_snake);
-        ak_assert(status == AK_StatusKind_OK);
 
+        ak_str8 op;
         AK_StringList operands = {0};
         AK_StringList props = {0};
-
-        if (mrv_ldesc_ref_is_valid(entry.as.operator.left_arg_type)) {
-            ak_str8 arg_name_snake = {0};
-            status = ak_str8_pascal_to_snake_case(entry.as.operator.left_arg_name, ctx->scratch, &arg_name_snake);
-            ak_assert(status == AK_StatusKind_OK);
-
-            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(",\n    "));
-            ak_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.left_arg_type)));
-            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(" "));
-            ak_strlist_append(&operands, ctx->scratch, arg_name_snake);
-
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            ."));
-            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(" = "));
-            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(","));
-        }
-        if (mrv_ldesc_ref_is_valid(entry.as.operator.right_arg_type)) {
-            ak_str8 arg_name_snake = {0};
-            status = ak_str8_pascal_to_snake_case(entry.as.operator.right_arg_name, ctx->scratch, &arg_name_snake);
-            ak_assert(status == AK_StatusKind_OK);
-
-            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(",\n    "));
-            ak_strlist_append(&operands, ctx->scratch, mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.right_arg_type)));
-            ak_strlist_append(&operands, ctx->scratch, ak_str8_lit(" "));
-            ak_strlist_append(&operands, ctx->scratch, arg_name_snake);
-
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            ."));
-            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(" = "));
-            ak_strlist_append(&props, ctx->scratch, arg_name_snake);
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit(","));
-        }
-
         ak_str8 early_return_statement;
-        AK_StringList return_type = {0};
-        if (mrv_ldesc_ref_is_valid(entry.as.operator.return_type)) {
-            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("AK_"));
-            ak_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
-            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("Symbol_"));
-            ak_strlist_append(&return_type, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type));
+        AK_StringList return_type_strlist = {0};
+        {
+            ak_str8 left_arg_name;
+            ak_str8 right_arg_name;
+            MRV_LanguageDescriptorRef return_type;
+            MRV_LanguageDescriptorRef left_arg_type;
+            MRV_LanguageDescriptorRef right_arg_type;
+            if (entry.kind == MRV_LanguageDescriptorEntryKind_Operator) {
+                op = entry.name;
+                return_type = entry.as.operator.return_type;
+                left_arg_type = entry.as.operator.left_arg_type;
+                right_arg_type = entry.as.operator.right_arg_type;
+                left_arg_name = entry.as.operator.left_arg_name;
+                right_arg_name = entry.as.operator.right_arg_name;
+            } else if (entry.kind == MRV_LanguageDescriptorEntryKind_Type) {
+                ak_assert(entry.as.type.type_kind == MRV_TypeKind_Lambda);
 
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            .return_val = "));
-            ak_strlist_append(&props, ctx->scratch, ak_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
+                status = ak_strcat(ctx->scratch, (ak_str8[]){entry.name, ak_str8_lit("Declaration")}, 2, &op);
+                ak_assert(status == AK_StatusKind_OK);
 
-            status = ak_sprintf(
-                ctx->scratch,
-                &early_return_statement,
-                ak_str8_lit("return ak_nil(AK_%{str}Symbol_%{str});"),
-                ctx->ldesc->language_name,
-                mrv_ldesc_get_name(ctx->ldesc, entry.as.operator.return_type)
-            );
-            ak_assert(status == AK_StatusKind_OK);
-        } else {
-            ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("void"));
-            early_return_statement = ak_str8_lit("return;");
-        }
+                return_type = (MRV_LanguageDescriptorRef){0};
+                left_arg_type = entry.as.type.as.lambda.left_arg_type;
+                right_arg_type = entry.as.type.as.lambda.right_arg_type;
+                left_arg_name = ak_str8_lit("left_arg");
+                right_arg_name = ak_str8_lit("right_arg");
+            } else {
+                ak_unreachable();
+            }
+
+            if (mrv_ldesc_ref_is_valid(left_arg_type)) {
+                ak_str8 arg_name_snake = {0};
+                status = ak_str8_pascal_to_snake_case(left_arg_name, ctx->scratch, &arg_name_snake);
+                ak_assert(status == AK_StatusKind_OK);
+
+                ak_str8 operand;
+                status = ak_sprintf(
+                    ctx->scratch,
+                    &operand,
+                    ak_str8_lit(",\n    %{str} %{str}"),
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, left_arg_type)),
+                    arg_name_snake
+                );
+                ak_assert(status == AK_StatusKind_OK);
+                ak_strlist_append(&operands, ctx->scratch, operand);
+
+                ak_str8 prop;
+                status = ak_sprintf(
+                    ctx->scratch,
+                    &prop,
+                    ak_str8_lit("\n            .%{str} = %{str},"),
+                    arg_name_snake, arg_name_snake
+                );
+                ak_assert(status == AK_StatusKind_OK);
+                ak_strlist_append(&props, ctx->scratch, prop);
+            }
+            if (mrv_ldesc_ref_is_valid(right_arg_type)) {
+                ak_str8 arg_name_snake = {0};
+                status = ak_str8_pascal_to_snake_case(right_arg_name, ctx->scratch, &arg_name_snake);
+                ak_assert(status == AK_StatusKind_OK);
+
+                ak_str8 operand;
+                status = ak_sprintf(
+                    ctx->scratch,
+                    &operand,
+                    ak_str8_lit(",\n    %{str} %{str}"),
+                    mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, right_arg_type)),
+                    arg_name_snake
+                );
+                ak_assert(status == AK_StatusKind_OK);
+                ak_strlist_append(&operands, ctx->scratch, operand);
+
+                ak_str8 prop;
+                status = ak_sprintf(
+                    ctx->scratch,
+                    &prop,
+                    ak_str8_lit("\n            .%{str} = %{str},"),
+                    arg_name_snake, arg_name_snake
+                );
+                ak_assert(status == AK_StatusKind_OK);
+                ak_strlist_append(&props, ctx->scratch, prop);
+            }
+
+            if (mrv_ldesc_ref_is_valid(return_type)) {
+                ak_strlist_append(&return_type_strlist, ctx->scratch, ak_str8_lit("AK_"));
+                ak_strlist_append(&return_type_strlist, ctx->scratch, ctx->ldesc->language_name);
+                ak_strlist_append(&return_type_strlist, ctx->scratch, ak_str8_lit("Symbol_"));
+                ak_strlist_append(&return_type_strlist, ctx->scratch, mrv_ldesc_get_name(ctx->ldesc, return_type));
+
+                ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            .return_val = "));
+                ak_strlist_append(&props, ctx->scratch, ak_str8_lit("{ .id = builder->next_symbol_id + 1 },"));
+
+                status = ak_sprintf(
+                    ctx->scratch,
+                    &early_return_statement,
+                    ak_str8_lit("return ak_nil(AK_%{str}Symbol_%{str});"),
+                    ctx->ldesc->language_name,
+                    mrv_ldesc_get_name(ctx->ldesc, return_type)
+                );
+                ak_assert(status == AK_StatusKind_OK);
+            } else {
+                ak_strlist_append(&return_type_strlist, ctx->scratch, ak_str8_lit("void"));
+                early_return_statement = ak_str8_lit("return;");
+            }
+        }        
 
         if (props.tail != NULL) {
             ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n        "));
         }
 
+        ak_str8 name_snake;
+        status = ak_str8_pascal_to_snake_case(op, ctx->scratch, &name_snake);
+        ak_assert(status == AK_StatusKind_OK);
+        ak_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, op);
+
         MRV_TmplFieldTable fields[] = {
             {ak_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
             {ak_str8_lit("lang_first_letter"),       { .str = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
             {ak_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
-            {ak_str8_lit("return_type"),             { .strlist = return_type }},
+            {ak_str8_lit("return_type"),             { .strlist = return_type_strlist }},
             {ak_str8_lit("early_return_statement"),  { .str = early_return_statement }},
-            {ak_str8_lit("op"),                      { .str = entry.name }},
+            {ak_str8_lit("op"),                      { .str = op }},
             {ak_str8_lit("op_snake"),                { .str = name_snake }},
             {ak_str8_lit("op_var_ident"),            { .str = var_ident }},
             {ak_str8_lit("operands"),                { .strlist = operands }},
@@ -3884,52 +3958,6 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
 
         ak_pop_scope(ctx->scratch, scope);
     }
-
-    AK_Scope scope = ak_push_scope(ctx->scratch);
-
-    AK_StringList return_type = {0};
-    ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("AK_"));
-    ak_strlist_append(&return_type, ctx->scratch, ctx->ldesc->language_name);
-    ak_strlist_append(&return_type, ctx->scratch, ak_str8_lit("Symbol_AnyArg"));
-
-    ak_str8 early_return_statement = {0};
-    AK_StatusKind status = ak_sprintf(
-        ctx->scratch,
-        &early_return_statement,
-        ak_str8_lit("return ak_nil(AK_%{str}Symbol_AnyArg);"),
-        ctx->ldesc->language_name
-    );
-    ak_assert(status == AK_StatusKind_OK);
-
-    AK_StringList operands = {0};
-    ak_strlist_append(&operands, ctx->scratch, ak_str8_lit("\n    AK_"));
-    ak_strlist_append(&operands, ctx->scratch, ctx->ldesc->language_name);
-    ak_strlist_append(&operands, ctx->scratch, ak_str8_lit("Symbol_AnyArg sym"));
-
-    AK_StringList props = {0};
-    ak_strlist_append(&props, ctx->scratch, ak_str8_lit("\n            .sym = sym,\n        "));
-
-    MRV_TmplFieldTable fields[] = {
-        {ak_str8_lit("lang_name"),               { .str = ctx->ldesc->language_name }},
-        {ak_str8_lit("lang_first_letter"),       { .str = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p } }},
-        {ak_str8_lit("lang_snake"),              { .str = ctx->common_strings.lang_snake_case}},
-        {ak_str8_lit("return_type"),             { .strlist = return_type }},
-        {ak_str8_lit("early_return_statement"),  { .str = early_return_statement }},
-        {ak_str8_lit("op"),                      { .str = ak_str8_lit("AnyArg") }},
-        {ak_str8_lit("op_snake"),                { .str = ak_str8_lit("any_arg") }},
-        {ak_str8_lit("op_var_ident"),            { .str = ak_str8_lit("any_arg") }},
-        {ak_str8_lit("operands"),                { .strlist = operands }},
-        {ak_str8_lit("props"),                   { .strlist = props }},
-    };
-    mrv_write_tmpl(ctx->header_file_writer, header_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
-    mrv_write_tmpl(ctx->source_file_writer, source_tmpl, fields, sizeof(fields) / sizeof(MRV_TmplFieldTable));
-
-    ak_printf(ctx->source_file_writer, ak_str8_lit(
-        "\n\n    builder->next_symbol_id++;"
-        "\n    return (AK_%{str}Symbol_AnyArg){ .id = builder->next_symbol_id };\n}\n"
-    ), ctx->ldesc->language_name);
-
-    ak_pop_scope(ctx->scratch, scope);
 }
 
 void
