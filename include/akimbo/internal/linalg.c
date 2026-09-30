@@ -247,7 +247,7 @@ ak_infer_contracted_dims(
     size_t n_batch_axes
 ) {
     if (x0->rank < n_contracted_axes || n_contracted_axes + n_batch_axes > x1->rank) {
-        return AK_StatusKind_InvalidArgument;
+        return AK_StatusKind_OtherwiseInvalidArgument;
     }
 
     // repeated below
@@ -293,7 +293,7 @@ ak_create_broadcasted_iteration_space(
     }
 
     if (y->rank != y_should.rank) {
-        return AK_StatusKind_InvalidRank;
+        return AK_StatusKind_OtherwiseInvalidArgument;
     }
     for (uint8_t i = 0; i < y_should.rank; i++) {
         if (y_should.dim[i] != y->dim[i]) {
@@ -376,7 +376,7 @@ ak_create_contracted_iteration_space(
         n_batch_axes > x0->rank ||
         n_batch_axes > x1->rank
     ) {
-        return AK_StatusKind_InvalidArgument;
+        return AK_StatusKind_OtherwiseInvalidArgument;
     }
 
     ////////////////////////////////////////////////////////////////////

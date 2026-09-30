@@ -30,7 +30,7 @@ ak_lbuilder_append_(
 ) {
     AK_LogicalBuilderNode *node = ak_arena_alloc_struct(&ctx->arena, AK_LogicalBuilderNode);
     if (node == NULL) {
-        ak_report_error(ctx, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory appending to logical expr"));
+        ak_report_error(&ctx->err, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory appending to logical expr"));
         return ak_nil(AK_LogicalSymbol);
     }
 
@@ -77,7 +77,7 @@ ak_pin(AK_Context *ctx, AK_LogicalBuilder *builder, AK_LogicalSymbol sym) {
         }
     }
 
-    ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+    ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
         ak_str8_lit("did not find symbol with id %{i64} while attempting to pin it"), sym.id
     );
 }
@@ -123,14 +123,14 @@ ak_lbuilder_finish(
     AK_Allocator artifact_allocator,
     AK_LogicalExpr *out_lexpr
 ) {
-    AK_StatusKind status = ak_check_error(ctx);
+    AK_StatusKind status = ctx->err.relevant_status;
     if (status != AK_StatusKind_OK) {
         return status;
     }
 
     if (builder->next_symbol_id == 0 || builder->ir_tail == NULL) {
-        ak_report_error(ctx, AK_StatusKind_InvalidArgument, ak_str8_lit("attempted to finish empty builder"));
-        return AK_StatusKind_InvalidArgument;
+        ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, ak_str8_lit("attempted to finish empty builder"));
+        return AK_StatusKind_OtherwiseInvalidArgument;
     }
 
     ////////////////////////////////////////////////////////////////////////////////
@@ -154,25 +154,25 @@ ak_lbuilder_finish(
             }
 
             if (ak_unlikely(!is_first_iteration && hare != NULL && tortoise == hare)) {
-                ak_report_error(ctx, AK_StatusKind_InvalidArgument, ak_str8_lit("detected cycle in expr builder node list"));
-                return AK_StatusKind_InvalidArgument;
+                ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, ak_str8_lit("detected cycle in expr builder node list"));
+                return AK_StatusKind_OtherwiseInvalidArgument;
             }
 
             if (ak_unlikely(tortoise->node.y.id > max_symbol_id)) {
-                ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+                ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.y.id, lexpr_len
                 );
-                return AK_StatusKind_InvalidArgument;
+                return AK_StatusKind_OtherwiseInvalidArgument;
             } else if (ak_unlikely(tortoise->node.x0.id > max_symbol_id)) {
-                ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+                ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.x0.id, lexpr_len
                 );
-                return AK_StatusKind_InvalidArgument;
+                return AK_StatusKind_OtherwiseInvalidArgument;
             } else if (ak_unlikely(tortoise->node.x1.id > max_symbol_id)) {
-                ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+                ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("found invalid, discontiguous symbol id %{i64} at expr node %{i64}"), tortoise->node.x1.id, lexpr_len
                 );
-                return AK_StatusKind_InvalidArgument;
+                return AK_StatusKind_OtherwiseInvalidArgument;
             }
 
             is_first_iteration = false;
@@ -185,7 +185,7 @@ ak_lbuilder_finish(
     
     AK_LogicalInst *lexpr_nodes = (AK_LogicalInst*)ak_alloc_zero(artifact_allocator, lexpr_len * sizeof(AK_LogicalInst));
     if (lexpr_nodes == NULL) {
-        ak_report_error(ctx, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory allocating logical expr nodes"));
+        ak_report_error(&ctx->err, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory allocating logical expr nodes"));
         return AK_StatusKind_OutOfMemory;
     }
 
@@ -324,20 +324,20 @@ ak_validate_lexpr_structure(AK_Context *ctx, AK_LogicalExpr *lexpr) {
         for (size_t i = 0; i < lexpr->len; i++) {
             if (lexpr->insts[i].opcode == AK_LogicalOpcode_Param && !params_begin) {
                 if (i != 0) {
-                    ak_report_error(ctx, AK_StatusKind_InvalidArgument, ak_str8_lit(
+                    ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, ak_str8_lit(
                         "found the first param declaration at node index %{i64}\n"
                         "note: param declarations must be the first thing in the expr"
                     ), i);
-                    status = AK_StatusKind_InvalidArgument;
+                    status = AK_StatusKind_OtherwiseInvalidArgument;
                     goto out;
                 }
                 params_begin = true;
             } else if (lexpr->insts[i].opcode == AK_LogicalOpcode_Param && params_end) {
-                ak_report_error(ctx, AK_StatusKind_InvalidArgument, ak_str8_lit(
+                ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, ak_str8_lit(
                     "found a param declaration after a non-param operation at node index %{i64}\n"
                     "note: param declarations must happen one after another"
                 ), i);
-                status = AK_StatusKind_InvalidArgument;
+                status = AK_StatusKind_OtherwiseInvalidArgument;
                 goto out;
             } else if (lexpr->insts[i].opcode != AK_LogicalOpcode_Param && params_begin) {
                 params_end = true;
@@ -353,10 +353,10 @@ ak_validate_lexpr_structure(AK_Context *ctx, AK_LogicalExpr *lexpr) {
         AK_BitVector seen_set;
         status = ak_bv_init(&seen_set, &ctx->arena, lexpr->max_symbol_id);
         if (status == AK_StatusKind_OutOfMemory) {
-            ak_report_error(ctx, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory allocating scratch space for validation"));
+            ak_report_error(&ctx->err, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory allocating scratch space for validation"));
             goto out;
         } else if (status != AK_StatusKind_OK) {
-            ak_report_error(ctx, status, ak_str8_lit("failed to initialize a scratch structure during validation"));
+            ak_report_error(&ctx->err, status, ak_str8_lit("failed to initialize a scratch structure during validation"));
             goto out;
         }
 
@@ -370,40 +370,40 @@ ak_validate_lexpr_structure(AK_Context *ctx, AK_LogicalExpr *lexpr) {
             const bool found_y  = ak_bv_get_bit(&seen_set, new_id);
 
             if (new_id == 0) {
-                ak_report_error(ctx,AK_StatusKind_InvalidArgument, ak_str8_lit(
+                ak_report_error(&ctx->err,AK_StatusKind_OtherwiseInvalidArgument, ak_str8_lit(
                     "found a symbol with id 0 at node index %{i64}\n"
                     "0 is a reserved symbol id (invalid)"
                 ));
-                status = AK_StatusKind_InvalidArgument;
+                status = AK_StatusKind_OtherwiseInvalidArgument;
                 goto out;
             }
 
             if (found_y) {
                 ak_report_error(
-                    ctx, 
-                    AK_StatusKind_InvalidArgument, 
+                    &ctx->err, 
+                    AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("symbol %{i64} was born for the second time at node index %{i64}, violating SSA"),
                     lexpr->insts[i].y.id, i
                 );
-                status = AK_StatusKind_InvalidArgument;
+                status = AK_StatusKind_OtherwiseInvalidArgument;
                 goto out;
             } else if (!found_x0 && !ak_lopcode_is_ctor(lexpr->insts[i].opcode))  {
                 ak_report_error(
-                    ctx, 
-                    AK_StatusKind_InvalidArgument, 
+                    &ctx->err, 
+                    AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("use of unknown symbol with id %{i64} as the first operand at node index %{i64}"),
                     x0_id, i
                 );
-                status = AK_StatusKind_InvalidArgument;
+                status = AK_StatusKind_OtherwiseInvalidArgument;
                 goto out;
             } else if (!found_x1 && ak_lopcode_is_binary(lexpr->insts[i].opcode)) {
                 ak_report_error(
-                    ctx, 
-                    AK_StatusKind_InvalidArgument, 
+                    &ctx->err, 
+                    AK_StatusKind_OtherwiseInvalidArgument, 
                     ak_str8_lit("use of unknown symbol with id %{i64} as the second operand at node index %{i64}"),
                     x1_id, i
                 );
-                status = AK_StatusKind_InvalidArgument;
+                status = AK_StatusKind_OtherwiseInvalidArgument;
                 goto out;
             }
 
@@ -438,7 +438,7 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_Symtab *symtab)
             &symtab->nodes[node->x1.id].shape,
         }, 2);
         if (status != AK_StatusKind_OK) {
-            ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+            ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
                 ak_str8_lit("symbols %{i64} and %{i64} could not be broadcasted"),
                 node->x0.id, node->x1.id
             );
@@ -458,7 +458,7 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_Symtab *symtab)
             node->meta_as.contract.n_batch_axes
         );
         if (status != AK_StatusKind_OK) {
-            ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
+            ak_report_error(&ctx->err, AK_StatusKind_OtherwiseInvalidArgument, 
                 ak_str8_lit("symbols %{i64} and %{i64} could not be contracted"),
                 node->x0.id, node->x1.id
             );
@@ -506,7 +506,7 @@ ak_lower_lexpr(
     symtab.nodes = ak_arena_alloc_array(&ctx->arena, AK_SymtabNode, symtab.cap);
     if (symtab.nodes == NULL) {
         status = AK_StatusKind_OutOfMemory;
-        ak_report_error(ctx, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
+        ak_report_error(&ctx->err, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
         goto out;
     }
     
@@ -526,7 +526,7 @@ ak_lower_lexpr(
         );
         if (status != AK_StatusKind_OK) {
             ak_assert(status == AK_StatusKind_OutOfMemory);
-            ak_report_error(ctx, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
+            ak_report_error(&ctx->err, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
             goto out;
         }
 

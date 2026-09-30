@@ -74,6 +74,9 @@
 #   define ak_static_assert(cond)
 #endif // defined(_Static_assert)
 
+/// Match an enum variant like an adt
+#define ak_match(T, v) switch ((enum T)(v))
+
 /// memory utils
 
 #define ak_align_up(x, align) (((x) + (align) - 1) & ~((align) - 1))
@@ -109,43 +112,40 @@
     *(psrc) = (T*)(dest); \
 } while (0)
 
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ///
 /// status codes
 ///
 ////////////////////////////////////////////////////////////////////////////////
- 
+
 #define AK_DEFINE_STATUS_KINDS \
-    AK_X(OK), \
-    AK_X(InvalidArgument), \
-    AK_X(InvalidRank), \
-    AK_X(ShapeMismatch), \
-    AK_X(StrideMismatch), \
-    AK_X(Overflow), \
-    AK_X(NotFound), \
-    AK_X(Duplicate), \
-    AK_X(UnsupportedOpcode), \
-    AK_X(OutOfMemory), \
-    AK_X(OutOfBounds), \
-    AK_X(UnexpectedNaN),
+    AK_X(OK) \
+    AK_X(OutOfMemory) \
+    AK_X(NullArgument) \
+    AK_X(OtherwiseInvalidArgument) \
+    AK_X(ShapeMismatch)
 
 typedef enum
 AK_StatusKind {
-#   define AK_X(x) AK_StatusKind_##x
+#   define AK_X(x) AK_StatusKind_##x,
     AK_DEFINE_STATUS_KINDS
 #   undef AK_X
 } AK_StatusKind;
 
-// TODO: maybe these should be ak_str8s
 ak_maybe_unused static const uint8_t*
 AK_STATUS_KIND_CSTRING_TABLE[] = {
-#   define AK_X(x) [AK_StatusKind_##x] = (const uint8_t*)#x
+#   define AK_X(x) [AK_StatusKind_##x] = (const uint8_t*)#x,
     AK_DEFINE_STATUS_KINDS
 #   undef AK_X
 };
 
-#define ak_status_kind_as_cstring(status) AK_STATUS_KIND_CSTRING_TABLE[(status)]
+/// a catastrophic error is an error that is both
+/// a) not the fault of the programmer who wrote the code and
+/// b) not necessarily caused by the user's input.
+#define ak_status_is_catastrophic(status) ((status) == AK_StatusKind_OutOfMemory)
+#define ak_status_as_cstring(status) AK_STATUS_KIND_CSTRING_TABLE[(status)]
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -157,8 +157,7 @@ AK_STATUS_KIND_CSTRING_TABLE[] = {
 
 typedef uint8_t
 AK_AllocatorModeKind;
-enum 
-AK_AllocatorModeKind {
+enum AK_AllocatorModeKind {
     AK_AllocatorModeKind_Alloc,
     AK_AllocatorModeKind_Free,
     AK_AllocatorModeKind_GetDefaultPreAllocation,
@@ -403,10 +402,10 @@ ak_copy_to_cstring(uint8_t *dst, const ak_str8 src);
 size_t
 ak_write(AK_Writer *writer, ak_str8 string);
 
-AK_StatusKind 
+size_t
 ak_printf(AK_Writer *writer, const ak_str8 fmt, ...);
 
-AK_StatusKind 
+size_t
 ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap);
 
 AK_StatusKind

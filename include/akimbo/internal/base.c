@@ -70,7 +70,7 @@ ak_vfmt_cstr(va_list ap, AK_Writer *writer) {
 size_t 
 ak_vfmt_status(va_list ap, AK_Writer *writer) {
     AK_StatusKind status = va_arg(ap, AK_StatusKind);
-    uint8_t *s = (uint8_t*)ak_status_kind_as_cstring(status);
+    uint8_t *s = (uint8_t*)ak_status_as_cstring(status);
     ak_str8 str8 = ak_str8_from_cstr(s);
     return ak_write(writer, str8);
 }
@@ -183,18 +183,19 @@ ak_write_itoa(AK_Writer *writer, int64_t n) {
     return ak_write(writer, ((ak_str8){ .len = len, .p = buf }));
 }
 
-AK_StatusKind 
+size_t 
 ak_printf(AK_Writer *writer, const ak_str8 fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    AK_StatusKind status = ak_vprintf(writer, fmt, ap);
+    size_t bytes_written = ak_vprintf(writer, fmt, ap);
     va_end(ap);
-    return status;
+    return bytes_written;
 }
 
-AK_StatusKind 
+size_t
 ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
-    AK_StatusKind status = AK_StatusKind_OK;
+    size_t bytes_written = 0;
+    bool error = false;
 
     // this just accumulates bytes until we hit a format specifier or the end of `fmt`
     // and need to flush them to `writer`.
@@ -217,7 +218,7 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
         // we'll now flush the slice before this to the stream and 
         // try to parse said specifier
 
-        ak_write(writer, buf);
+        bytes_written += ak_write(writer, buf);
 
         ak_str8 fmtspec;
         {
@@ -231,7 +232,7 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
                 while (fmt.p[fmtspec_end] != '}') {
                     // unterminated format specifier
                     if (fmtspec_end >= fmt.len - 1) {
-                        status = AK_StatusKind_InvalidArgument;
+                        error = true;
                         goto out;
                     }
                     fmtspec_end++;
@@ -244,7 +245,7 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
                 .p = fmt.p + fmtspec_begin,
             };
             if (fmtspec.len == 0) {
-                status = AK_StatusKind_InvalidArgument;
+                error = true;
                 goto out;
             }
 
@@ -257,13 +258,13 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
             bool found = false;
             for (size_t i = 0; i < AK_FMT_FN_LUT_LEN; i++) {
                 if (AK_FMT_FN_LUT[i].hash == hash) {
-                    AK_FMT_FN_LUT[i].fn(ap, writer);
+                    bytes_written += AK_FMT_FN_LUT[i].fn(ap, writer);
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                status = AK_StatusKind_InvalidArgument;
+                error = true;
                 goto out;
             }
         }
@@ -276,12 +277,12 @@ ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap) {
 
 out:
     if (buf.len > 0) {
-        ak_write(writer, buf);
+        bytes_written += ak_write(writer, buf);
     }
-    if (status != AK_StatusKind_OK) {
-        ak_write(writer, ak_str8_lit("(error)"));
+    if (error) {
+        bytes_written += ak_write(writer, ak_str8_lit("(error)"));
     }
-    return status;
+    return bytes_written;
 }
 
 typedef struct
@@ -323,9 +324,8 @@ ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...) {
     {
         va_list ap;
         va_start(ap, fmt);
-        AK_StatusKind status = ak_vprintf(&counting_writer, fmt, ap);
+        ak_vprintf(&counting_writer, fmt, ap);
         va_end(ap);
-        ak_assert(status == AK_StatusKind_OK); // this writer cannot fail
     }
 
     const size_t len = closure.count_len;
@@ -344,9 +344,8 @@ ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...) {
     {
         va_list ap;
         va_start(ap, fmt);
-        AK_StatusKind status = ak_vprintf(&writing_writer, fmt, ap);
+        ak_vprintf(&writing_writer, fmt, ap);
         va_end(ap);
-        ak_assert(status == AK_StatusKind_OK); // this writer also cannot fail
     }
 
     *out_str = (ak_str8){ .len = len, .p = p };
@@ -1119,7 +1118,7 @@ ak_table_probe(
     if (search_for_empty) {
         return AK_StatusKind_OutOfMemory;
     } else {
-        return AK_StatusKind_NotFound;
+        return AK_StatusKind_OK;
     }
 
 out_success:
@@ -1149,6 +1148,7 @@ ak_table_ensure_g(
     size_t last_idx;
     status = ak_table_probe(table, cmp_key, hash, fingerprint, true, &last_idx, &found);
     if (status != AK_StatusKind_OK) {
+        ak_assert(status == AK_StatusKind_OutOfMemory);
         found = false;
         last_idx = 0;
         goto out;
@@ -1184,9 +1184,8 @@ ak_table_get_g(
     bool found;
     size_t last_idx;
     AK_StatusKind status = ak_table_probe(table, cmp_key, hash, fingerprint, false, &last_idx, &found);
-    // we are't allocating a slot, and this only returns not ok when we're out of capacity or
-    // did not find something.
-    ak_assert(status == AK_StatusKind_OK || status == AK_StatusKind_NotFound); 
+    // we are't allocating a slot, and this only returns not ok when we're out of capacity
+    ak_assert(status == AK_StatusKind_OK); 
     if (out_found != NULL) {
         *out_found = found;
     }
@@ -1235,7 +1234,7 @@ ak_table_ensure_str8(
         if (out_was_occupied != NULL) {
             *out_was_occupied = false;
         }
-        return AK_StatusKind_InvalidArgument;
+        return AK_StatusKind_OK;
     }
     
     uint64_t hash;
