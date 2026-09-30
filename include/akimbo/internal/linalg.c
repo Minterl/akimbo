@@ -14,7 +14,7 @@ ak_vfmt_lshape_ptr(va_list ap, AK_Writer *writer) {
             written += ak_write(writer, ak_str8_lit(" x "));
         }
     }
-    written += ak_write(writer, ak_str8_lit("}\n"));
+    written += ak_write(writer, ak_str8_lit("}"));
 
     return written;
 }
