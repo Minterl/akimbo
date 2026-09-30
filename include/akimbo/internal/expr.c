@@ -295,6 +295,18 @@ ak_bv_and(AK_BitVector *bv, uint64_t *b) {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
+typedef struct 
+AK_SymtabNode {
+    AK_AffineTransform *address_operator;
+    AK_LogicalShape shape;
+} AK_SymtabNode;
+
+typedef struct 
+AK_Symtab {
+    uint32_t cap;
+    AK_SymtabNode *nodes ak_check_bounds(cap);
+} AK_Symtab;
+
 /// validate functional structure of the expression
 AK_StatusKind
 ak_validate_lexpr_structure(AK_Context *ctx, AK_LogicalExpr *lexpr) {
@@ -409,21 +421,21 @@ out:
 /// of the SSA form hold s.t shapes will never attempt to infer themselves
 /// on other nil shapes
 AK_StatusKind
-ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_LogicalShape *inout_shapes) {
+ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_Symtab *symtab) {
     AK_StatusKind status = AK_StatusKind_OK;
 
     switch (node->opcode) {
     case AK_LogicalOpcode_Param:
-        inout_shapes[node->y.id].rank = node->meta_as.param.y_shape.rank;
-        ak_memcpy(&inout_shapes[node->y.id], &node->meta_as.param.y_shape.rank, sizeof(size_t) * AK_MAX_RANK);
+        symtab->nodes[node->y.id].shape.rank = node->meta_as.param.y_shape.rank;
+        ak_memcpy(&symtab->nodes[node->y.id].shape, &node->meta_as.param.y_shape.rank, sizeof(size_t) * AK_MAX_RANK);
         break;
 
     case AK_LogicalOpcode_Add:
     case AK_LogicalOpcode_Sub: {
         AK_LogicalShape y;
         status = ak_infer_broadcasted_dims(&y, (const AK_LogicalShape*[2]){
-            &inout_shapes[node->x0.id],
-            &inout_shapes[node->x1.id],
+            &symtab->nodes[node->x0.id].shape,
+            &symtab->nodes[node->x1.id].shape,
         }, 2);
         if (status != AK_StatusKind_OK) {
             ak_report_error(ctx, AK_StatusKind_InvalidArgument, 
@@ -432,7 +444,7 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_LogicalShape *i
             );
             return status;
         }
-        inout_shapes[node->y.id] = y;
+        symtab->nodes[node->y.id].shape = y;
         break;
     }
 
@@ -440,8 +452,8 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_LogicalShape *i
         AK_LogicalShape y;
         status = ak_infer_contracted_dims(
             &y,
-            &inout_shapes[node->x0.id],
-            &inout_shapes[node->x1.id],
+            &symtab->nodes[node->x0.id].shape,
+            &symtab->nodes[node->x1.id].shape,
             node->meta_as.contract.n_contracted_axes,
             node->meta_as.contract.n_batch_axes
         );
@@ -452,7 +464,7 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_LogicalShape *i
             );
             return status;
         }
-        inout_shapes[node->y.id] = y;
+        symtab->nodes[node->y.id].shape = y;
         break;
     }
 
@@ -472,6 +484,7 @@ ak_lower_lexpr(
     AK_LogicalExpr *lexpr,
     AK_LogicalExprLoweringFlags flags
 ) {
+    (void)artifact_allocator;
 
     // TODO: the layout assignment and alignment needs to be smarter than this
     static const AK_LayoutKind DEFAULT_LAYOUT = AK_LayoutKind_RowMajor;
@@ -480,50 +493,36 @@ ak_lower_lexpr(
     AK_StatusKind status = AK_StatusKind_OK;
     AK_Scope scope = ak_push_scope(&ctx->arena);
 
-
-    /////////////////////////////////////////////////////////////////
-    // ~~ validate SSA invariants ~~
-
     if (!(flags & AK_LogicalExprLoweringFlag_NoStructuralInvariantValidation)) {
         status = ak_validate_lexpr_structure(ctx, lexpr);
         if (status != AK_StatusKind_OK) {
             goto out;
         }
     }
-    
 
-    /////////////////////////////////////////////////////////////////
-    // ~~ shape inference ~~
-
-    AK_LogicalShape *shapes = ak_arena_alloc_array(&ctx->arena, AK_LogicalShape, lexpr->max_symbol_id);
-    if (shapes == NULL) {
+    AK_Symtab symtab = {
+        .cap = lexpr->max_symbol_id + 1,
+    };
+    symtab.nodes = ak_arena_alloc_array(&ctx->arena, AK_SymtabNode, symtab.cap);
+    if (symtab.nodes == NULL) {
         status = AK_StatusKind_OutOfMemory;
         ak_report_error(ctx, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
         goto out;
     }
+    
     for (size_t i = 0; i < lexpr->len; i++) {
-        status = ak_infer_y_shape(ctx, &lexpr->insts[i], shapes);
+        status = ak_infer_y_shape(ctx, &lexpr->insts[i], &symtab);
         if (status != AK_StatusKind_OK) {
             goto out;
         }
     }
 
-
-    /////////////////////////////////////////////////////////////////
-    // ~~ calculate address operators ~~
-    
-    AK_AffineTransform **addr_ops = ak_arena_alloc_array(&ctx->arena, AK_AffineTransform*, lexpr->max_symbol_id);
-    if (addr_ops == NULL) {
-        status = AK_StatusKind_OutOfMemory;
-        ak_report_error(ctx, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
-        goto out;
-    }
-    for (size_t i = 0; i < lexpr->max_symbol_id; i++) {
+    for (size_t i = 0; i < symtab.cap; i++) {
         status = ak_atran_strided_projection_from_shape(
             &ctx->arena,
-            &shapes[i],
+            &symtab.nodes[i].shape,
             DEFAULT_LAYOUT, DEFAULT_ALIGN,
-            &addr_ops[i]
+            &symtab.nodes[i].address_operator
         );
         if (status != AK_StatusKind_OK) {
             ak_assert(status == AK_StatusKind_OutOfMemory);
@@ -531,14 +530,16 @@ ak_lower_lexpr(
             goto out;
         }
 
-        ak_assert(ak_atran_is_valid_address_operator(addr_ops[i]));
+        ak_assert(ak_atran_is_valid_address_operator(symtab.nodes[i].address_operator));
     }
 
-
-    /////////////////////////////////////////////////////////////////
-    // ~~ fin ~~
-
-    (void)artifact_allocator;
+    for (uint32_t i = 0; i < symtab.cap; i++) {
+        ak_printf(
+            &AK_DBG_WRITER,
+            ak_str8_lit("symbol_id = %{i64}\nshape = %{lshape_ptr}\naddr_op = %{atran_ptr}\n\n"),
+            i, &symtab.nodes[i].shape, symtab.nodes[i].address_operator
+        );
+    }
 
 out:
     ak_pop_scope(&ctx->arena, scope);

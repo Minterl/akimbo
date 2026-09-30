@@ -27,7 +27,7 @@ ak_vfmt_atran_ptr(va_list ap, AK_Writer *writer) {
     const int64_t *const A = ak_atran_get_A(atran);
     const int64_t *const b = ak_atran_get_b(atran);
 
-    ak_write(writer, ak_str8_lit("A = "));
+    ak_write(writer, ak_str8_lit("(A = "));
     for (uint32_t i = 0; i < atran->n_rows; i++) {
         if (i != 0) {
             ak_write(writer, ak_str8_lit("\n"));
@@ -52,7 +52,7 @@ ak_vfmt_atran_ptr(va_list ap, AK_Writer *writer) {
             ak_write(writer, ak_str8_lit(", "));
         }
     }
-    ak_write(writer, ak_str8_lit("]"));
+    ak_write(writer, ak_str8_lit("])"));
 
     return written;
 }
@@ -101,9 +101,6 @@ ak_atran_strided_projection_from_shape(
 
     *out_atran = atran;
 
-    int64_t *b = ak_atran_get_b(atran);
-    ak_printf(&AK_DBG_WRITER, ak_str8_lit("%{atran_ptr}, %{i64}\n\n"), atran, b[0]);
-
     return AK_StatusKind_OK;
 }
 
@@ -111,21 +108,24 @@ void
 ak_atran_apply(
     const AK_AffineTransform *atran,
     const int64_t *x, // must be an array of length atran.n_cols
-    int64_t *y // must be an array of length atran.n_rows
+    int64_t *out_y // must be an array of length atran.n_rows
 ) {
+    ak_assert(x != NULL);
+    ak_assert(out_y != NULL);
+
     const int64_t *const restrict A = ak_atran_get_A(atran);
     const int64_t *const restrict b = ak_atran_get_b(atran);
 
-    ak_memzero(y, atran->n_rows * sizeof(int64_t));
+    ak_memzero(out_y, atran->n_rows * sizeof(int64_t));
 
     for (uint8_t i_rows = 0; i_rows < atran->n_rows; i_rows++) {
         for (uint8_t i_cols = 0; i_cols < atran->n_cols; i_cols++) {
-            y[i_rows] += A[atran->n_cols*i_rows + i_cols] * x[i_cols];
+            out_y[i_rows] += A[atran->n_cols*i_rows + i_cols] * x[i_cols];
         }
     }
 
     for (uint8_t i_rows = 0; i_rows < atran->n_rows; i_rows++) {
-        y[i_rows] += b[i_rows];
+        out_y[i_rows] += b[i_rows];
     }
 }
 
