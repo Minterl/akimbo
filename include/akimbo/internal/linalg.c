@@ -8,7 +8,7 @@ ak_vfmt_lshape_ptr(va_list ap, AK_Writer *writer) {
     AK_LogicalShape *shape = va_arg(ap, AK_LogicalShape*);
 
     written += ak_write(writer, ak_str8_lit("{"));
-    for (size_t i = 0; i < shape->rank; i++) {
+    for (uint32_t i = 0; i < shape->rank; i++) {
         written += ak_printf(writer, ak_str8_lit("%{i64}"), shape->dim[i]);
         if (i != shape->rank - 1) {
             written += ak_write(writer, ak_str8_lit(" x "));
@@ -17,6 +17,49 @@ ak_vfmt_lshape_ptr(va_list ap, AK_Writer *writer) {
     written += ak_write(writer, ak_str8_lit("}"));
 
     return written;
+}
+
+size_t
+ak_vfmt_atran_ptr(va_list ap, AK_Writer *writer) {
+    size_t written = 0;
+
+    AK_AffineTransform *atran = va_arg(ap, AK_AffineTransform*);
+    const int64_t *const A = ak_atran_get_A(atran);
+    const int64_t *const b = ak_atran_get_b(atran);
+
+    ak_write(writer, ak_str8_lit("A = "));
+    for (uint32_t i = 0; i < atran->n_rows; i++) {
+        if (i != 0) {
+            ak_write(writer, ak_str8_lit("\n"));
+        } 
+        ak_write(writer, ak_str8_lit("["));
+
+        for (uint32_t j = 0; j < atran->n_cols; j++) {
+            ak_printf(writer, ak_str8_lit("%{i64}"), A[i*atran->n_cols + j]);
+            if ((int32_t)j != atran->n_cols - 1) {
+                ak_write(writer, ak_str8_lit(", "));
+            } 
+        }
+
+        ak_write(writer, ak_str8_lit("]"));
+    }
+
+    ak_write(writer, ak_str8_lit(", b = "));
+    ak_write(writer, ak_str8_lit("["));
+    for (uint32_t i = 0; i < atran->n_rows; i++) {
+        ak_printf(writer, ak_str8_lit("%{i64}"), b[i]);
+        if ((int32_t)i != atran->n_rows - 1) {
+            ak_write(writer, ak_str8_lit(", "));
+        }
+    }
+    ak_write(writer, ak_str8_lit("]"));
+
+    return written;
+}
+
+size_t
+ak_atran_sizeof(uint32_t n_rows, uint32_t n_cols) {
+    return (n_rows * n_cols + n_rows) * sizeof(int64_t);
 }
 
 AK_StatusKind
@@ -29,7 +72,7 @@ ak_atran_strided_projection_from_shape(
 ) {
     ak_assert(out_atran != NULL);
 
-    AK_AffineTransform *atran = ak_arena_alloc_famstruct(arena, AK_AffineTransform, shape->rank * sizeof(uint64_t));
+    AK_AffineTransform *atran = ak_arena_alloc_famstruct(arena, AK_AffineTransform, ak_atran_sizeof(1, shape->rank));
     if (atran == NULL) {
         return AK_StatusKind_OutOfMemory;
     }
@@ -57,6 +100,9 @@ ak_atran_strided_projection_from_shape(
     ak_assert(ak_atran_is_valid_address_operator(atran));
 
     *out_atran = atran;
+
+    int64_t *b = ak_atran_get_b(atran);
+    ak_printf(&AK_DBG_WRITER, ak_str8_lit("%{atran_ptr}, %{i64}\n\n"), atran, b[0]);
 
     return AK_StatusKind_OK;
 }

@@ -95,9 +95,6 @@ AK_MappedSpace {
 #define ak_atran_get_x_len(atran) ((atran)->n_cols)
 #define ak_atran_get_y_len(atran) ((atran)->n_rows)
 
-void
-ak_lshape_fmt(AK_LogicalShape *shape, AK_Writer *writer);
-
 AK_StatusKind
 ak_poly_make_parallelotope(
     AK_Arena *arena,

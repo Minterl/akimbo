@@ -32,6 +32,7 @@ ak_write(AK_Writer *writer, ak_str8 string) {
     AK_X(str) \
     AK_X(cstr) \
     AK_X(lshape_ptr) \
+    AK_X(atran_ptr) \
     AK_X(status)
 
 #define AK_X(fmtspec) \
