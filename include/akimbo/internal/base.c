@@ -1,5 +1,12 @@
 #include <akimbo/internal/base.h>
 
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+///
+/// misc.
+///
+////////////////////////////////////////////////////////////////////////////////
+
 int32_t
 ak_memcmp_(uint8_t *a, uint8_t *b, size_t len) {
     for (size_t i = 0; i < len; i++) {
@@ -107,7 +114,7 @@ ak_strcpy(ak_str8 dest, const ak_str8 src) {
     return i;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_strcat(
     AK_Arena *arena,
     ak_str8 *strings,
@@ -123,7 +130,7 @@ ak_strcat(
 
     uint8_t *new_p = ak_arena_alloc_array(arena, uint8_t, new_len);
     if (new_p == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     ak_str8 new_str = { .len = new_len, .p = new_p };
@@ -136,7 +143,7 @@ ak_strcat(
     }
 
     *out_str = new_str;
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
 void 
@@ -308,7 +315,7 @@ ak_sprintf_write(void *ctx_, ak_str8 txt) {
     return txt.len;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...) {
     ak_assert(out_str != NULL);
 
@@ -331,7 +338,7 @@ ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...) {
     const size_t len = closure.count_len;
     uint8_t *p = ak_arena_alloc_array(arena, uint8_t, len);
     if (p == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     closure.out = p;
@@ -349,8 +356,8 @@ ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...) {
     }
 
     *out_str = (ak_str8){ .len = len, .p = p };
-
-    return AK_StatusKind_OK;
+ 
+    return AK_CatastropheKind_OK;
 }
 
 ak_force_inline bool
@@ -393,7 +400,7 @@ ak_char_is_alphanumeric(uint8_t ch) {
     return ak_char_is_alpha(ch) || ak_char_is_numeric(ch);
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_str8_pascal_to_snake_case(
     ak_str8 str,
     AK_Arena *arena,
@@ -414,7 +421,7 @@ ak_str8_pascal_to_snake_case(
 
     uint8_t *new_p = ak_arena_alloc_array(arena, uint8_t, new_len);
     if (new_p == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     for (
@@ -437,10 +444,10 @@ ak_str8_pascal_to_snake_case(
 
     *out_str = (ak_str8){ .len = new_len, .p = new_p };
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_str8_to_upper(
     ak_str8 str,
     AK_Arena *arena,
@@ -453,7 +460,7 @@ ak_str8_to_upper(
 
     uint8_t *new_p = ak_arena_alloc_array(arena, uint8_t, str.len);
     if (new_p == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     for (size_t i = 0; i < str.len; i++) {
@@ -466,10 +473,10 @@ ak_str8_to_upper(
 
     *out_str = (ak_str8){ .len = str.len, .p = new_p };
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_str8_to_lower(
     ak_str8 str,
     AK_Arena *arena,
@@ -482,7 +489,7 @@ ak_str8_to_lower(
 
     uint8_t *new_p = ak_arena_alloc_array(arena, uint8_t, str.len);
     if (new_p == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     for (size_t i = 0; i < str.len; i++) {
@@ -495,10 +502,10 @@ ak_str8_to_lower(
 
     *out_str = (ak_str8){ .len = str.len, .p = new_p };
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
-AK_StatusKind 
+AK_CatastropheKind 
 ak_strlist_append(
     AK_StringList *strlist,
     AK_Arena *arena,
@@ -506,7 +513,7 @@ ak_strlist_append(
 ) {
     AK_StringListHead *head = ak_arena_alloc_famstruct(arena, AK_StringListHead, str.len);
     if (head == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     head->str = str;
@@ -517,7 +524,7 @@ ak_strlist_append(
     }
     strlist->tail = head;
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
 void
@@ -644,7 +651,7 @@ ak_alloc_zero(AK_Allocator alloc, size_t size_bytes) {
     return ptr;
 }
 
-AK_StatusKind 
+AK_CatastropheKind 
 ak_alloc_contiguous_blocks(
     AK_Allocator alloc,
     uint8_t **out_ptrs,
@@ -660,7 +667,7 @@ ak_alloc_contiguous_blocks(
 
     uint8_t *ptr = ak_alloc_zero(alloc, size);
     if (ptr == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     if (out_bytes_allocated != NULL) {
@@ -673,7 +680,7 @@ ak_alloc_contiguous_blocks(
         current_offset += ak_align_up(sizes[i], align);
     }
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
 
@@ -993,7 +1000,7 @@ ak_next_pow2(size_t x) {
     return x + 1;
 }
 
-AK_StatusKind 
+AK_CatastropheKind 
 ak_table_init(AK_Table *table, AK_Arena *arena, size_t cap) {
     cap = cap < 8 ? 8 : ak_next_pow2(cap);
     const size_t align = 16;
@@ -1004,14 +1011,14 @@ ak_table_init(AK_Table *table, AK_Arena *arena, size_t cap) {
     uint64_t *keys = (uint64_t*)ak_arena_alloc(arena, sz_keys, align);
     AK_TableFingerprintBlock *fingerprints = (AK_TableFingerprintBlock*)ak_arena_alloc(arena, sz_fingerprints, align);
     if (keys == NULL || fingerprints == NULL) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     }
 
     table->cap = cap;
     table->keys = keys;
     table->fingerprints_as = fingerprints;
 
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
 ak_force_inline void 
@@ -1035,7 +1042,7 @@ ak_table_make_hash(
     }
 }
 
-ak_force_inline AK_StatusKind 
+ak_force_inline AK_CatastropheKind
 ak_table_probe(
     AK_Table *table,
     uint64_t key,
@@ -1116,9 +1123,9 @@ ak_table_probe(
     }
 
     if (search_for_empty) {
-        return AK_StatusKind_OutOfMemory;
+        return AK_CatastropheKind_OutOfMemory;
     } else {
-        return AK_StatusKind_OK;
+        return AK_CatastropheKind_OK;
     }
 
 out_success:
@@ -1128,10 +1135,10 @@ out_success:
     if (out_found != NULL) {
         *out_found = ret_found;
     }
-    return AK_StatusKind_OK;
+    return AK_CatastropheKind_OK;
 }
 
-AK_StatusKind 
+AK_CatastropheKind 
 ak_table_ensure_g(
     AK_Table *table,
     uint64_t cmp_key,
@@ -1142,13 +1149,12 @@ ak_table_ensure_g(
 ) {
     ak_assert(ak_next_pow2(table->cap) == table->cap && table->cap >= 8);
 
-    AK_StatusKind status = AK_StatusKind_OK;
+    AK_CatastropheKind status = AK_CatastropheKind_OK;
 
     bool found;
     size_t last_idx;
     status = ak_table_probe(table, cmp_key, hash, fingerprint, true, &last_idx, &found);
-    if (status != AK_StatusKind_OK) {
-        ak_assert(status == AK_StatusKind_OutOfMemory);
+    if (status != AK_CatastropheKind_OK) {
         found = false;
         last_idx = 0;
         goto out;
@@ -1183,9 +1189,9 @@ ak_table_get_g(
 
     bool found;
     size_t last_idx;
-    AK_StatusKind status = ak_table_probe(table, cmp_key, hash, fingerprint, false, &last_idx, &found);
+    AK_CatastropheKind status = ak_table_probe(table, cmp_key, hash, fingerprint, false, &last_idx, &found);
     // we are't allocating a slot, and this only returns not ok when we're out of capacity
-    ak_assert(status == AK_StatusKind_OK); 
+    ak_assert(status == AK_CatastropheKind_OK); 
     if (out_found != NULL) {
         *out_found = found;
     }
@@ -1193,7 +1199,7 @@ ak_table_get_g(
     return found ? last_idx : 0;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_table_ensure_u64(
     AK_Table *table,
     uint64_t key,
@@ -1203,7 +1209,7 @@ ak_table_ensure_u64(
     uint64_t hash;
     uint8_t fingerprint;
     ak_table_make_hash((uint8_t*)&key, 4, &hash, &fingerprint);
-    AK_StatusKind status = ak_table_ensure_g(table, key, hash, fingerprint, out_idx, out_was_occupied);
+    AK_CatastropheKind status = ak_table_ensure_g(table, key, hash, fingerprint, out_idx, out_was_occupied);
     return status;
 }
 
@@ -1220,7 +1226,7 @@ ak_table_get_u64(
     return idx;
 }
 
-AK_StatusKind
+AK_CatastropheKind
 ak_table_ensure_str8(
     AK_Table *table,
     ak_str8 key,
@@ -1234,7 +1240,7 @@ ak_table_ensure_str8(
         if (out_was_occupied != NULL) {
             *out_was_occupied = false;
         }
-        return AK_StatusKind_OK;
+        return AK_CatastropheKind_OK;
     }
     
     uint64_t hash;
@@ -1247,7 +1253,7 @@ ak_table_ensure_str8(
     // instead, we'll just use a different hash function.
     uint64_t padded_cmp_key = ak_hash_16(key.p, key.len > 16 ? 16 : key.len);
 
-    AK_StatusKind status = ak_table_ensure_g(table, padded_cmp_key, hash, fingerprint, out_idx, out_was_occupied);
+    AK_CatastropheKind status = ak_table_ensure_g(table, padded_cmp_key, hash, fingerprint, out_idx, out_was_occupied);
 
     return status;
 }

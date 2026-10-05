@@ -1,3 +1,4 @@
+#include "base.h"
 #include <akimbo/internal/context.h>
 
 
@@ -33,7 +34,7 @@ ak_report_error(AK_Error *err, AK_StatusKind relevant_status, ak_str8 fmt, ...) 
 
     va_list ap;
     va_start(ap, fmt);
-    AK_StatusKind vprintf_status = ak_vprintf(err->writer, fmt, ap);
+    size_t vprintf_status = ak_vprintf(err->writer, fmt, ap);
     (void)vprintf_status;
     va_end(ap);
 

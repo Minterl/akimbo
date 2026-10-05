@@ -2295,7 +2295,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
         size_t idx;
         bool found;
-        AK_StatusKind status = ak_table_ensure_str8(
+        AK_CatastropheKind status = ak_table_ensure_str8(
             &ctx->ldesc.table,
             ident,
             &idx,
@@ -2310,7 +2310,7 @@ mrv_sema_record_type_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
             );
             break;
         }
-        ak_assert(status == AK_StatusKind_OK);
+        ak_assert(status == AK_CatastropheKind_OK);
 
         if (type_kind == MRV_TypeKind_Lambda) {
             MRV_ASTNode *outer_ident = as.TypeDeclaration.non_trivial_alias->children_as.NonTrivialType.outermost_ident;
@@ -2495,8 +2495,8 @@ mrv_sema_record_op_decls_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         size_t op_idx;
         {
             bool found;
-            AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, op_ident, &op_idx, &found);
-            ak_assert(status == AK_StatusKind_OK);
+            AK_CatastropheKind status = ak_table_ensure_str8(&ctx->ldesc.table, op_ident, &op_idx, &found);
+            ak_assert(status == AK_CatastropheKind_OK);
             if (found) {
                 mrv_report_error(
                     &ctx->err,
@@ -2691,8 +2691,8 @@ mrv_sema_append_inst_for_expr(MRV_SemaContext *ctx, MRV_ASTNode *self, MRV_Symbo
             {
                 bool found;
                 size_t type_ldesc_idx;
-                AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, type_str, &type_ldesc_idx, &found);
-                ak_assert(status == AK_StatusKind_OK);
+                AK_CatastropheKind status = ak_table_ensure_str8(&ctx->ldesc.table, type_str, &type_ldesc_idx, &found);
+                ak_assert(status == AK_CatastropheKind_OK);
                 if (!found) {
                     mrv_report_error(
                         &ctx->err,
@@ -2764,8 +2764,8 @@ mrv_sema_block_to_inst_stream_r(MRV_SemaContext *ctx, MRV_ASTNode *self) {
         {
             bool found;
             size_t type_ldesc_idx;
-            AK_StatusKind status = ak_table_ensure_str8(&ctx->ldesc.table, symbol_type_ident_str, &type_ldesc_idx, &found);
-            ak_assert(status == AK_StatusKind_OK);
+            AK_CatastropheKind status = ak_table_ensure_str8(&ctx->ldesc.table, symbol_type_ident_str, &type_ldesc_idx, &found);
+            ak_assert(status == AK_CatastropheKind_OK);
             if (!found) {
                 mrv_report_error(
                     &ctx->err,
@@ -2805,7 +2805,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
 
     AK_Scope scope = ak_push_scope(ctx->scratch);
 
-    AK_StatusKind status;
+    AK_CatastropheKind status;
     MRV_ASTNodeChildren as = self->children_as;
 
 
@@ -2819,7 +2819,7 @@ mrv_sema_record_combinators(MRV_SemaContext *ctx, MRV_ASTNode *self) {
     {
         bool found;
         status = ak_table_ensure_str8(&ctx->ldesc.table, ident, &ldesc_idx, &found);
-        ak_assert(status == AK_StatusKind_OK);
+        ak_assert(status == AK_CatastropheKind_OK);
         if (found) {
             mrv_report_error(
                 &ctx->err,
@@ -3210,11 +3210,11 @@ mrv_analyze(
         .err.writer = err_writer,
     };
     // TODO: remove magic number capacity
-    AK_StatusKind status = AK_StatusKind_OK;
+    AK_CatastropheKind status = AK_CatastropheKind_OK;
 
     ak_arena_init(&ctx.ldesc.arena, artifact_allocator);
     status = ak_table_init(&ctx.ldesc.table, &ctx.ldesc.arena, 1024);
-    ak_assert(status == AK_StatusKind_OK);
+    ak_assert(status == AK_CatastropheKind_OK);
 
     ctx.ldesc.entries = ak_arena_alloc_array(&ctx.ldesc.arena, MRV_LanguageDescriptorEntry, 1024);
     ak_assert(ctx.ldesc.entries != NULL);
@@ -3362,13 +3362,13 @@ mrv_sg_fmt_symbol_type(MRV_SourcegenContext *ctx, ak_str8 name) {
     ak_assert(entry.kind == MRV_LanguageDescriptorEntryKind_Type);
 
     ak_str8 cat = {0};
-    AK_StatusKind status = ak_strcat(ctx->scratch, (ak_str8[]){
+    AK_CatastropheKind status = ak_strcat(ctx->scratch, (ak_str8[]){
         ak_str8_lit("AK_"),
         ctx->ldesc->language_name,
         ak_str8_lit("Symbol_"),
         entry.name,
     }, 4, &cat);
-    ak_assert(status == AK_StatusKind_OK);
+    ak_assert(status == AK_CatastropheKind_OK);
 
     return cat;
 }
@@ -3426,11 +3426,11 @@ ak_str8
 mrv_sg_pascal_to_snake_escaped(AK_Arena *arena, ak_str8 original) {
     ak_assert(original.len != 0);
 
-    AK_StatusKind status;
+    AK_CatastropheKind status;
 
     ak_str8 name_snake_case;
     status = ak_str8_pascal_to_snake_case(original, arena, &name_snake_case);
-    ak_assert(status == AK_StatusKind_OK);
+    ak_assert(status == AK_CatastropheKind_OK);
 
     if (name_snake_case.len > 16) {
         return name_snake_case;
@@ -3449,7 +3449,7 @@ mrv_sg_pascal_to_snake_escaped(AK_Arena *arena, ak_str8 original) {
         // waste memory who cares
         ak_str8 cat;
         status = ak_strcat(arena, (ak_str8[]){name_snake_case, ak_str8_lit("_")}, 2, &cat);
-        ak_assert(status == AK_StatusKind_OK);
+        ak_assert(status == AK_CatastropheKind_OK);
 
         return cat;
     }
@@ -3812,7 +3812,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
         }
 
         AK_Scope scope = ak_push_scope(ctx->scratch);
-        AK_StatusKind status = AK_StatusKind_OK;
+        AK_CatastropheKind status = AK_CatastropheKind_OK;
 
         ak_str8 op;
         AK_StringList operands = {0};
@@ -3836,7 +3836,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                 ak_assert(entry.as.type.type_kind == MRV_TypeKind_Lambda);
 
                 status = ak_strcat(ctx->scratch, (ak_str8[]){entry.name, ak_str8_lit("Declaration")}, 2, &op);
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
 
                 return_type = (MRV_LanguageDescriptorRef){0};
                 left_arg_type = entry.as.type.as.lambda.left_arg_type;
@@ -3850,7 +3850,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
             if (mrv_ldesc_ref_is_valid(left_arg_type)) {
                 ak_str8 arg_name_snake = {0};
                 status = ak_str8_pascal_to_snake_case(left_arg_name, ctx->scratch, &arg_name_snake);
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
 
                 ak_str8 operand;
                 status = ak_sprintf(
@@ -3860,7 +3860,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                     mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, left_arg_type)),
                     arg_name_snake
                 );
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
                 ak_strlist_append(&operands, ctx->scratch, operand);
 
                 ak_str8 prop;
@@ -3870,13 +3870,13 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                     ak_str8_lit("\n            .%{str} = %{str},"),
                     arg_name_snake, arg_name_snake
                 );
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
                 ak_strlist_append(&props, ctx->scratch, prop);
             }
             if (mrv_ldesc_ref_is_valid(right_arg_type)) {
                 ak_str8 arg_name_snake = {0};
                 status = ak_str8_pascal_to_snake_case(right_arg_name, ctx->scratch, &arg_name_snake);
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
 
                 ak_str8 operand;
                 status = ak_sprintf(
@@ -3886,7 +3886,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                     mrv_sg_fmt_symbol_type(ctx, mrv_ldesc_get_name(ctx->ldesc, right_arg_type)),
                     arg_name_snake
                 );
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
                 ak_strlist_append(&operands, ctx->scratch, operand);
 
                 ak_str8 prop;
@@ -3896,7 +3896,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                     ak_str8_lit("\n            .%{str} = %{str},"),
                     arg_name_snake, arg_name_snake
                 );
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
                 ak_strlist_append(&props, ctx->scratch, prop);
             }
 
@@ -3916,7 +3916,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
                     ctx->ldesc->language_name,
                     mrv_ldesc_get_name(ctx->ldesc, return_type)
                 );
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
             } else {
                 ak_strlist_append(&return_type_strlist, ctx->scratch, ak_str8_lit("void"));
                 early_return_statement = ak_str8_lit("return;");
@@ -3929,7 +3929,7 @@ ak_${{lang_first_letter}}builder_${{op_snake}}(
 
         ak_str8 name_snake;
         status = ak_str8_pascal_to_snake_case(op, ctx->scratch, &name_snake);
-        ak_assert(status == AK_StatusKind_OK);
+        ak_assert(status == AK_CatastropheKind_OK);
         ak_str8 var_ident = mrv_sg_pascal_to_snake_escaped(ctx->scratch, op);
 
         MRV_TmplFieldTable fields[] = {
@@ -3991,8 +3991,8 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
         }
 
         ak_str8 comb_name_snake;
-        AK_StatusKind status = ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &comb_name_snake);
-        ak_assert(status == AK_StatusKind_OK);
+        AK_CatastropheKind status = ak_str8_pascal_to_snake_case(entry.name, ctx->scratch, &comb_name_snake);
+        ak_assert(status == AK_CatastropheKind_OK);
 
         ak_str8 lang_first_letter = (ak_str8){ .len = 1, .p = ctx->common_strings.lang_snake_case.p };
 
@@ -4014,7 +4014,7 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 ak_str8 sym_name = mrv_span_to_str8(istream.symtab[istream.insts[i].as.invocation.new_symbol.id].ident_span, ctx->text);
                 ak_str8 op_snake;
                 status = ak_str8_pascal_to_snake_case(op_entry.name, ctx->scratch, &op_snake);
-                ak_assert(status == AK_StatusKind_OK);
+                ak_assert(status == AK_CatastropheKind_OK);
 
                 mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
 
@@ -4090,11 +4090,11 @@ ak_${{lang_first_letter}}builder_do_${{comb_name_snake}}(
                 {
                     ak_str8 args_len;
                     status = ak_sprintf(ctx->scratch, &args_len, ak_str8_lit(".args_len = %{i64},"), n_args);
-                    ak_assert(status == AK_StatusKind_OK);
+                    ak_assert(status == AK_CatastropheKind_OK);
 
                     ak_str8 body_len;
                     status = ak_sprintf(ctx->scratch, &body_len, ak_str8_lit(".body_len = %{i64},"), n_args);
-                    ak_assert(status == AK_StatusKind_OK);
+                    ak_assert(status == AK_CatastropheKind_OK);
 
                     mrv_strlist_newline_indent(&statements, ctx->scratch, indent);
                     ak_strlist_append(&statements, ctx->scratch, args_len);
@@ -4171,12 +4171,12 @@ mrv_gen_source(
 
     // common strigs
     {
-        AK_StatusKind status = AK_StatusKind_OK;
+        AK_CatastropheKind status = AK_CatastropheKind_OK;
 
         status = ak_str8_to_upper(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_capitalized);
         status = ak_str8_pascal_to_snake_case(ldesc->language_name, ctx.scratch, &ctx.common_strings.lang_snake_case);
 
-        ak_assert(status == AK_StatusKind_OK);
+        ak_assert(status == AK_CatastropheKind_OK);
     }
 
     ak_printf(

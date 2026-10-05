@@ -120,6 +120,10 @@
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
+#define AK_DEFINE_CATASTROPHE_KINDS \
+    AK_X(OK) \
+    AK_X(OutOfMemory)
+
 #define AK_DEFINE_STATUS_KINDS \
     AK_X(OK) \
     AK_X(OutOfMemory) \
@@ -127,6 +131,28 @@
     AK_X(OtherwiseInvalidArgument) \
     AK_X(ShapeMismatch)
 
+/// a catastrophic error is an error that is both
+/// a) not the fault of the programmer who wrote the code and
+/// b) not necessarily caused by the user's input.
+///
+/// functions that can only fail catastrphically should return 
+/// a catastrophe rather than a generic status
+typedef enum
+AK_CatastropheKind {
+#   define AK_X(x) AK_CatastropheKind_##x,
+    AK_DEFINE_CATASTROPHE_KINDS
+#   undef AK_X
+} AK_CatastropheKind;
+
+enum {
+#   define AK_X(...) + 1
+    AK_CatastropheKind_COUNT = 0 AK_DEFINE_CATASTROPHE_KINDS
+#   undef AK_X
+};
+
+/// a superset of the set of all catastrophes i.e
+/// both those AND domain errors that may be interesting
+/// to the caller
 typedef enum
 AK_StatusKind {
 #   define AK_X(x) AK_StatusKind_##x,
@@ -141,11 +167,13 @@ AK_STATUS_KIND_CSTRING_TABLE[] = {
 #   undef AK_X
 };
 
-/// a catastrophic error is an error that is both
-/// a) not the fault of the programmer who wrote the code and
-/// b) not necessarily caused by the user's input.
-#define ak_status_is_catastrophic(status) ((status) == AK_StatusKind_OutOfMemory)
+/// if the names match, the numbers should too
+#define AK_X(x) ak_static_assert((uint8_t)AK_StatusKind_##x == (uint8_t)AK_CatastropheKind_##x);
+    AK_DEFINE_CATASTROPHE_KINDS
+#undef AK_X
+
 #define ak_status_as_cstring(status) AK_STATUS_KIND_CSTRING_TABLE[(status)]
+#define ak_status_is_catastrophic(status) ((uint8_t)(status) < (uint8_t)AK_CatastropheKind_COUNT && (uint8_t)(status) != (uint8_t)AK_CatastropheKind_OK)
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -257,7 +285,7 @@ ak_free(AK_Allocator alloc, void *ptr);
 ///
 /// `out_ptrs[0]` is the pointer the allocated region itself i.e the pointers
 /// are allocated in the order of `out_ptrs`.
-AK_StatusKind 
+AK_CatastropheKind 
 ak_alloc_contiguous_blocks(
     AK_Allocator alloc,
     uint8_t **out_ptrs,
@@ -388,7 +416,7 @@ ak_strcmp(const ak_str8 a, const ak_str8 b);
 size_t 
 ak_strcpy(ak_str8 dest, const ak_str8 src);
 
-AK_StatusKind
+AK_CatastropheKind
 ak_strcat(
     AK_Arena *arena,
     ak_str8 *strings,
@@ -408,7 +436,7 @@ ak_printf(AK_Writer *writer, const ak_str8 fmt, ...);
 size_t
 ak_vprintf(AK_Writer *writer, const ak_str8 fmt, va_list ap);
 
-AK_StatusKind
+AK_CatastropheKind
 ak_sprintf(AK_Arena *arena, ak_str8 *out_str, ak_str8 fmt, ...);
 
 size_t 
@@ -426,21 +454,28 @@ ak_char_is_numeric(uint8_t ch);
 ak_force_inline bool
 ak_char_is_alphanumeric(uint8_t ch);
 
-AK_StatusKind
+AK_CatastropheKind
 ak_str8_pascal_to_snake_case(
     ak_str8 str,
     AK_Arena *arena,
     ak_str8 *out_str
 );
 
-AK_StatusKind
+AK_CatastropheKind
 ak_str8_to_upper(
     ak_str8 str,
     AK_Arena *arena,
     ak_str8 *out_str
 );
 
-AK_StatusKind
+AK_CatastropheKind
+ak_str8_to_lower(
+    ak_str8 str,
+    AK_Arena *arena,
+    ak_str8 *out_str
+);
+
+AK_CatastropheKind
 ak_strlist_append(
     AK_StringList *strlist,
     AK_Arena *arena,
@@ -517,12 +552,12 @@ AK_TableIter {
 ak_force_inline uint32_t 
 ak_mmh(uint8_t *key, size_t len);
 
-AK_StatusKind 
+AK_CatastropheKind 
 ak_table_init(AK_Table *table, AK_Arena *arena, size_t cap);
 
 /// Ensures a key is present inside the table
 /// Cannot realloc memory
-AK_StatusKind 
+AK_CatastropheKind 
 ak_table_ensure_u64(AK_Table *table, uint64_t key, size_t *ak_nullable out_idx, bool *ak_nullable out_was_occupied);
 
 /// Returns the index corresponding to the key in the table, otherwise
@@ -533,7 +568,7 @@ ak_table_ensure_u64(AK_Table *table, uint64_t key, size_t *ak_nullable out_idx, 
 size_t 
 ak_table_get_u64(AK_Table *table, uint64_t key, bool *ak_nullable out_found);
 
-AK_StatusKind
+AK_CatastropheKind
 ak_table_ensure_str8(
     AK_Table *table,
     ak_str8 key,
