@@ -480,13 +480,18 @@ ak_infer_y_shape(AK_Context *ctx, const AK_LogicalInst *node, AK_Symtab *symtab)
 AK_StatusKind
 ak_lower_lexpr(
     AK_Context *ctx,
-    AK_Allocator artifact_allocator,
     AK_LogicalExpr *lexpr,
+    AK_Target *target,
     AK_LogicalExprLoweringFlags flags
 ) {
-    (void)artifact_allocator;
+    if (
+        ctx == NULL ||
+        lexpr == NULL ||
+        target == NULL
+    ) {
+        return AK_StatusKind_NullArgument;
+    }
 
-    // TODO: the layout assignment and alignment needs to be smarter than this
     static const AK_LayoutKind DEFAULT_LAYOUT = AK_LayoutKind_RowMajor;
     static const AK_LayoutKind DEFAULT_ALIGN = 16;
 
@@ -510,10 +515,58 @@ ak_lower_lexpr(
         goto out;
     }
     
+    AK_MappedSpace *spaces = ak_arena_alloc_array(&ctx->arena, AK_MappedSpace, lexpr->len);
+    if (spaces == NULL) {
+        status = AK_StatusKind_OutOfMemory;
+        ak_report_error(&ctx->err, status, ak_str8_lit("ran out of memory allocating a scratch structure"));
+        goto out;
+    }
+
     for (size_t i = 0; i < lexpr->len; i++) {
         status = ak_infer_y_shape(ctx, &lexpr->insts[i], &symtab);
         if (status != AK_StatusKind_OK) {
             goto out;
+        }
+
+        ak_match (AK_LogicalOpcode, lexpr->insts[i].opcode) {
+        case AK_LogicalOpcode_Param:
+            continue;
+
+        case AK_LogicalOpcode_Add: {
+            status = ak_create_broadcasted_iteration_space(
+                &ctx->arena,
+                &symtab.nodes[lexpr->insts[i].y.id].shape,
+                &symtab.nodes[lexpr->insts[i].x0.id].shape,
+                &symtab.nodes[lexpr->insts[i].x1.id].shape,
+                &spaces[i]
+            );
+            if (status != AK_StatusKind_OK) {
+                ak_unreachable("TODO");
+            }
+            break;
+       }
+
+        case AK_LogicalOpcode_Contract: {
+            status = ak_create_contracted_iteration_space(
+                &ctx->arena,
+                &symtab.nodes[lexpr->insts[i].y.id].shape,
+                &symtab.nodes[lexpr->insts[i].x0.id].shape,
+                &symtab.nodes[lexpr->insts[i].x1.id].shape,
+                lexpr->insts[i].meta_as.contract.n_batch_axes,
+                &spaces[i]
+            );
+            if (status != AK_StatusKind_OK) {
+                ak_unreachable("TODO");
+            }
+            break;
+        }
+
+        case AK_LogicalOpcode_Sub:
+        case AK_LogicalOpcode_Hadamard:
+        case AK_LogicalOpcode_ReLU:
+        case AK_LogicalOpcode_LN:
+            ak_unreachable("TODO");
+            break;
         }
     }
 
@@ -533,12 +586,93 @@ ak_lower_lexpr(
         ak_assert(ak_atran_is_valid_address_operator(symtab.nodes[i].address_operator));
     }
 
-    for (uint32_t i = 0; i < symtab.cap; i++) {
-        ak_printf(
-            &AK_DBG_WRITER,
-            ak_str8_lit("symbol_id = %{i64}\nshape = %{lshape_ptr}\naddr_op = %{atran_ptr}\n\n"),
-            i, &symtab.nodes[i].shape, symtab.nodes[i].address_operator
-        );
+    ak_match (AK_TargetKind, target->kind) {
+    case AK_TargetKind_C: {
+        AK_Writer source_writer = target->as.c.source_writer;
+
+        ak_printf(&source_writer, ak_str8_lit("void\n%{str}name_this_something(\n"), target->as.c.ident_prefix_lowercase);
+
+        uint32_t i_inst = 0;
+
+        {
+            for (; i_inst < lexpr->len && lexpr->insts[i_inst].opcode == AK_LogicalOpcode_Param; i_inst++) {
+                if (i_inst != 0) {
+                    ak_write(&source_writer, ak_str8_lit(",\n"));
+                }
+                ak_printf(&source_writer, ak_str8_lit("   %{str} symbol_%{i64}"), target->as.c.scalar_ptr_type, lexpr->insts[i_inst].y.id);
+            }
+        }
+
+        ak_printf(&source_writer, ak_str8_lit("\n) {"));
+
+        {
+            for (; i_inst < lexpr->len; i_inst++) {
+                const AK_LogicalInst *const inst = &lexpr->insts[i_inst];
+
+                const AK_Polyhedron *const iter_dom = spaces[i_inst].iteration_domain;
+                const AK_AffineTransform* const to_y = spaces[i_inst].to_y_coords;
+                // const AK_AffineTransform* const to_x0 = spaces[i_inst].to_x0_coords;
+                // const AK_AffineTransform* const to_x1 = spaces[i_inst].to_x1_coords;
+
+                if (iter_dom->repr_kind == AK_PolyhedronReprKind_CanonicalAABB) {
+                    const int64_t *extents = ak_canonical_aabb_get_extents(iter_dom);
+                    for (uint32_t i_iter_dom = 0; i_iter_dom < iter_dom->as.canonical_aabb.rank; i_iter_dom++) {
+                        ak_assert(extents[i_iter_dom] > 0);
+                        ak_printf(&source_writer, ak_str8_lit("\n    for (uint32_t i = 0; i < %{i64}; i++) {"), extents[i_iter_dom]);
+                    }
+
+                    {
+                        ak_printf( &source_writer, ak_str8_lit("\n        size_t y_coord[%{i64}] = {"), to_y->n_rows);
+                        for (uint32_t i_col = 0; i_col < to_y->n_rows; i_col++) {
+                            ak_write(&source_writer, ak_str8_lit("\n            0"));
+                            for (uint32_t i_row = 0; i_row < to_y->n_rows; i_row++) {
+                                ak_printf(&source_writer, ak_str8_lit(" + (induction_vector[%{i64}] * %{i64})"), i_col, ak_atran_get_A(to_y)[i_col * to_y->n_rows + i_row]);
+                            }
+                            ak_write(&source_writer, ak_str8_lit(","));
+                        }
+                        ak_write(&source_writer, ak_str8_lit(
+                                "\n        };"
+                        ));
+                    }
+
+                    {
+                        ak_match (AK_LogicalOpcode, inst->opcode) {
+                        case AK_LogicalOpcode_Param:
+                            ak_unreachable();
+                            break;
+
+                        case AK_LogicalOpcode_Add: {
+                            ak_printf(&source_writer, ak_str8_lit("\n    symbol_%{i64} = symbol_%{i64} + symbol_%{i64};"), inst->y, inst->x0, inst->x1);
+                            break;
+                        }
+
+                        case AK_LogicalOpcode_Contract: {
+                            ak_printf(&source_writer, ak_str8_lit("\n    symbol_%{i64} = symbol_%{i64} * symbol_%{i64};"), inst->y, inst->x0, inst->x1);
+                            break;
+                        }
+
+                        case AK_LogicalOpcode_Sub:
+                        case AK_LogicalOpcode_Hadamard:
+                        case AK_LogicalOpcode_ReLU:
+                        case AK_LogicalOpcode_LN:
+                            ak_unreachable("TODO");
+                            break;
+                        }
+                    }
+
+                    for (uint32_t i = 0; i < iter_dom->as.canonical_aabb.rank; i++) {
+                        ak_printf(&source_writer, ak_str8_lit("\n    }"), extents[i]);
+                    }
+                } else {
+                    ak_unreachable("TODO");
+                }
+                
+            }
+        } 
+
+        ak_write(&source_writer, ak_str8_lit("\n}"));
+        break;
+    }
     }
 
 out:

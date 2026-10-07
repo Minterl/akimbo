@@ -69,7 +69,14 @@ main(void) {
         goto out;
     }
 
-    status = ak_lower_lexpr(&ctx, libc_allocator, &lexpr, 0);
+    status = ak_lower_lexpr(&ctx, &lexpr, &(AK_Target){
+        .kind = AK_TargetKind_C,
+        .as.c = {
+            .source_writer = AK_DBG_WRITER,
+            .ident_prefix_lowercase = ak_str8_lit("ak_"),
+            .scalar_ptr_type = ak_str8_lit("float*"),
+        },
+    }, 0);
     if (status != AK_StatusKind_OK) {
         goto out;
     }

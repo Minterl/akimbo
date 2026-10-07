@@ -16,8 +16,8 @@
 ///
 /// The integer representations of opcodes are not designed
 /// to be stable and should not be serialized.
-typedef enum
-AK_LogicalOpcode {
+typedef uint8_t AK_LogicalOpcode;
+enum AK_LogicalOpcode {
 #   define AK_LOPCODE_FIRST_CTOR AK_LogicalOpcode_Param
 
     AK_LogicalOpcode_Param,
@@ -34,7 +34,7 @@ AK_LogicalOpcode {
     AK_LogicalOpcode_Contract,
     AK_LogicalOpcode_Hadamard,
 
-} AK_LogicalOpcode;
+};
 
 #define ak_lopcode_is_ctor(op) ((AK_LOPCODE_FIRST_CTOR <= (op)) && ((op) < AK_LOPCODE_FIRST_UNARY_OP))
 #define ak_lopcode_is_unary(op) ((AK_LOPCODE_FIRST_UNARY_OP <= (op)) && ((op) < AK_LOPCODE_FIRST_BINARY_OP))
@@ -104,12 +104,6 @@ AK_LogicalBuilder {
     uint32_t                next_symbol_id;
 } AK_LogicalBuilder;
 
-typedef uint32_t 
-AK_LogicalExprLoweringFlags;
-enum {
-    AK_LogicalExprLoweringFlag_NoStructuralInvariantValidation = (0x1),
-};
-
 AK_StatusKind
 ak_lbuilder_finish(
     AK_Context *ctx,
@@ -141,6 +135,50 @@ ak_contract(
     AK_LogicalSymbol x1,
     size_t n_contracted_axes,
     size_t n_batch_axes
+);
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+///
+/// compilation
+///
+////////////////////////////////////////////////////////////////////////////////
+
+typedef uint8_t 
+AK_TargetKind;
+enum AK_TargetKind {
+    AK_TargetKind_C,
+};
+
+typedef uint32_t 
+AK_LogicalExprLoweringFlags;
+enum {
+    AK_LogicalExprLoweringFlag_NoStructuralInvariantValidation = (0x1),
+};
+
+typedef struct
+AK_Target_C {
+    ak_str8 ident_prefix_lowercase;
+    ak_str8 scalar_ptr_type;
+    AK_Writer header_writer;
+    AK_Writer source_writer;
+} AK_Target_C;
+
+typedef struct
+AK_Target {
+    AK_TargetKind kind;
+    union {
+        AK_Target_C c;
+    } as;
+} AK_Target;
+
+AK_StatusKind
+ak_lower_lexpr(
+    AK_Context *ctx,
+    AK_LogicalExpr *lexpr,
+    AK_Target *target,
+    AK_LogicalExprLoweringFlags flags
 );
 
 #endif // AK_EXPR_H_

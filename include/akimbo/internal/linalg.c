@@ -208,7 +208,7 @@ ak_infer_broadcasted_dims(
     // 2) One of the dimensions is 1.
     // 3) One of the dimensions does not exist.
     
-    size_t master_dim[AK_MAX_RANK];
+    size_t master_dim[AK_MAX_RANK] = {0};
     for (size_t i = 0; i < max_rank; i++) {
         master_dim[i] = 1;
     }
@@ -312,34 +312,54 @@ ak_create_broadcasted_iteration_space(
     int64_t *iter_domain_extents = ak_canonical_aabb_get_extents(iter_domain);
     ak_memcpy(iter_domain_extents, y->dim, iter_domain_rank * sizeof(uint64_t));
 
-    AK_AffineTransform *to_y_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, iter_domain_rank * y->rank * sizeof(uint64_t));
+    AK_AffineTransform *to_y_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, (iter_domain_rank * y->rank + y->rank) * sizeof(uint64_t));
     if (to_y_coords == NULL) {
         return AK_StatusKind_OutOfMemory;
     }
-    AK_AffineTransform *to_x0_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, iter_domain_rank * x0->rank * sizeof(uint64_t));
+    AK_AffineTransform *to_x0_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, (iter_domain_rank * x0->rank + x0->rank) * sizeof(uint64_t));
     if (to_x0_coords == NULL) {
         return AK_StatusKind_OutOfMemory;
     }
-    AK_AffineTransform *to_x1_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, iter_domain_rank * x1->rank * sizeof(uint64_t));
+    AK_AffineTransform *to_x1_coords = ak_arena_alloc_famstruct(arena, AK_AffineTransform, (iter_domain_rank * x1->rank + x1->rank) * sizeof(uint64_t));
     if (to_x1_coords == NULL) {
         return AK_StatusKind_OutOfMemory;
     }
+
+    to_y_coords->n_rows = y->rank;
+    to_y_coords->n_cols = iter_domain_rank;
+
+    to_x0_coords->n_rows = x0->rank;
+    to_x0_coords->n_cols = iter_domain_rank;
+
+    to_x1_coords->n_rows = x1->rank;
+    to_x1_coords->n_cols = iter_domain_rank;
 
     int64_t *const restrict A_y  = ak_atran_get_A(to_y_coords);
     int64_t *const restrict A_x0 = ak_atran_get_A(to_x0_coords);
     int64_t *const restrict A_x1 = ak_atran_get_A(to_x1_coords);
 
-    for (uint8_t i_rev = 1; i_rev <= iter_domain_rank; i_rev++) {
-        uint8_t r = iter_domain_rank - i_rev;
-        if (x0->dim[r] != y->dim[r]) {
-            ak_assert(x0->dim[r] == 1);
-            A_x1[r*x1->rank + r] = 0;
+    for (uint32_t i =  0; i < iter_domain_rank; i++) {
+        if (x0->dim[i] != y->dim[i]) {
+            ak_assert(
+                x0->dim[i] == 0 ||
+                x0->dim[i] == 1
+            );
+            A_x0[i*x0->rank + i] = 0;
+        } else {
+            A_x0[i*x0->rank + i] = 1;
         }
-        if (x1->dim[r] != y->dim[r]) {
-            ak_assert(x1->dim[r] == 1);
-            A_x0[r*x1->rank + r] = 0;
+
+        if (x1->dim[i] != y->dim[i]) {
+            ak_assert(
+                x1->dim[i] == 0 ||
+                x1->dim[i] == 1
+            );
+            A_x1[i*x1->rank + i] = 0;
+        } else {
+            A_x1[i*x1->rank + i] = 1;
         }
-        A_y[r*y->rank + r] = 1;
+
+        A_y[i*y->rank + i] = 1;
     }
 
     // The resulting state of our tensor views looks like this:
