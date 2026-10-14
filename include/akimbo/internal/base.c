@@ -38,6 +38,7 @@ ak_write(AK_Writer *writer, ak_str8 string) {
     AK_X(i64) \
     AK_X(str) \
     AK_X(cstr) \
+    AK_X(char) \
     AK_X(lshape_ptr) \
     AK_X(atran_ptr) \
     AK_X(status)
@@ -73,6 +74,12 @@ ak_vfmt_cstr(va_list ap, AK_Writer *writer) {
     uint8_t *s = va_arg(ap, uint8_t*);
     ak_str8 str8 = ak_str8_from_cstr(s);
     return ak_write(writer, str8);
+}
+size_t 
+ak_vfmt_char(va_list ap, AK_Writer *writer) {
+    uint32_t as_32 = va_arg(ap, uint32_t);
+    uint8_t as_8 = as_32;
+    return ak_write(writer, (ak_str8){ .len = 1, .p = &as_8 });
 }
 size_t 
 ak_vfmt_status(va_list ap, AK_Writer *writer) {

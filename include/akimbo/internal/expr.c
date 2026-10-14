@@ -610,29 +610,51 @@ ak_lower_lexpr(
                 const AK_LogicalInst *const inst = &lexpr->insts[i_inst];
 
                 const AK_Polyhedron *const iter_dom = spaces[i_inst].iteration_domain;
-                const AK_AffineTransform* const to_y = spaces[i_inst].to_y_coords;
-                // const AK_AffineTransform* const to_x0 = spaces[i_inst].to_x0_coords;
-                // const AK_AffineTransform* const to_x1 = spaces[i_inst].to_x1_coords;
+                const AK_AffineTransform *const to_y = spaces[i_inst].to_y_coords;
+                // const AK_AffineTransform *const to_x0 = spaces[i_inst].to_x0_coords;
+                // const AK_AffineTransform *const to_x1 = spaces[i_inst].to_x1_coords;
+
+                const AK_AffineTransform *const y_addr_op = symtab.nodes[lexpr->insts[i_inst].y.id].address_operator;
 
                 if (iter_dom->repr_kind == AK_PolyhedronReprKind_CanonicalAABB) {
                     const int64_t *extents = ak_canonical_aabb_get_extents(iter_dom);
                     for (uint32_t i_iter_dom = 0; i_iter_dom < iter_dom->as.canonical_aabb.rank; i_iter_dom++) {
                         ak_assert(extents[i_iter_dom] > 0);
-                        ak_printf(&source_writer, ak_str8_lit("\n    for (uint32_t i = 0; i < %{i64}; i++) {"), extents[i_iter_dom]);
+                        uint8_t iterator_char = 'i' + i_iter_dom;
+                        ak_printf(
+                            &source_writer, 
+                            ak_str8_lit("\n    for (uint32_t %{char} = 0; %{char} < %{i64}; %{char}++) {"),
+                            iterator_char, iterator_char, extents[i_iter_dom], iterator_char
+                        );
                     }
 
                     {
-                        ak_printf( &source_writer, ak_str8_lit("\n        size_t y_coord[%{i64}] = {"), to_y->n_rows);
+                        // the y coordinate
+                        ak_printf(&source_writer, ak_str8_lit("\n        size_t y_coord[%{i64}] = {"), to_y->n_rows);
                         for (uint32_t i_col = 0; i_col < to_y->n_rows; i_col++) {
-                            ak_write(&source_writer, ak_str8_lit("\n            0"));
+                            ak_write(&source_writer, ak_str8_lit("\n            "));
+                            uint8_t iterator_char = 'i' + i_col;
                             for (uint32_t i_row = 0; i_row < to_y->n_rows; i_row++) {
-                                ak_printf(&source_writer, ak_str8_lit(" + (induction_vector[%{i64}] * %{i64})"), i_col, ak_atran_get_A(to_y)[i_col * to_y->n_rows + i_row]);
+                                if (i_row != 0) {
+                                    ak_write(&source_writer, ak_str8_lit(" + "));
+                                }
+                                ak_printf(&source_writer, ak_str8_lit("(%{char} * %{i64})"), iterator_char, ak_atran_get_A(to_y)[i_col * to_y->n_rows + i_row]);
                             }
                             ak_write(&source_writer, ak_str8_lit(","));
                         }
                         ak_write(&source_writer, ak_str8_lit(
                                 "\n        };"
                         ));
+
+                        // the actual y offset;
+                        ak_assert(ak_atran_is_valid_address_operator(y_addr_op));
+                        ak_write(&source_writer, ak_str8_lit("\n        size_t y_offset = "));
+                        for (uint32_t i_col = 0; i_col < y_addr_op->n_cols; i_col++) {
+                            if (i_col != 0) {
+                                ak_write(&source_writer, ak_str8_lit(" + "));
+                            }
+                            ak_printf(&source_writer, ak_str8_lit("(y_coord[%{i64}] * %{i64})"), i_col, ak_atran_get_A(y_addr_op)[i_col]);
+                        }
                     }
 
                     {
@@ -642,12 +664,10 @@ ak_lower_lexpr(
                             break;
 
                         case AK_LogicalOpcode_Add: {
-                            ak_printf(&source_writer, ak_str8_lit("\n    symbol_%{i64} = symbol_%{i64} + symbol_%{i64};"), inst->y, inst->x0, inst->x1);
                             break;
                         }
 
                         case AK_LogicalOpcode_Contract: {
-                            ak_printf(&source_writer, ak_str8_lit("\n    symbol_%{i64} = symbol_%{i64} * symbol_%{i64};"), inst->y, inst->x0, inst->x1);
                             break;
                         }
 
@@ -666,7 +686,6 @@ ak_lower_lexpr(
                 } else {
                     ak_unreachable("TODO");
                 }
-                
             }
         } 
 
