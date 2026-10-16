@@ -615,9 +615,9 @@ ak_dbg_write_stdout_(void *ctx, ak_str8 msg) {
 ////////////////////////////////////////////////////////////////////////////////
 
 ak_force_inline uint8_t*
-ak_alloc_nozero(AK_Allocator alloc, size_t size_bytes) {
+ak_alloc_nozero(AK_Allocator alloc, size_t size_bytes, size_t align) {
     return alloc.f(alloc.ctx, AK_AllocatorModeKind_Alloc, (AK_AllocatorModeParams){
-        .alloc = { .size_bytes = size_bytes },
+        .alloc = { .size_bytes = size_bytes, .align = align },
     }).alloc.ptr;
 }
 
@@ -644,8 +644,8 @@ ak_alloc_get_default_pre_allocation(AK_Allocator alloc) {
 }
 
 uint8_t*
-ak_alloc_zero(AK_Allocator alloc, size_t size_bytes) {
-    uint8_t *ptr = ak_alloc_nozero(alloc, size_bytes);
+ak_alloc_zero(AK_Allocator alloc, size_t size_bytes, size_t align) {
+    uint8_t *ptr = ak_alloc_nozero(alloc, size_bytes, align);
     if (ptr == NULL) {
         return ptr;
     }
@@ -672,7 +672,7 @@ ak_alloc_contiguous_blocks(
         size += ak_align_up(sizes[i], align);
     }
 
-    uint8_t *ptr = ak_alloc_zero(alloc, size);
+    uint8_t *ptr = ak_alloc_zero(alloc, size, align);
     if (ptr == NULL) {
         return AK_CatastropheKind_OutOfMemory;
     }
@@ -731,22 +731,18 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
     ak_assert(arena->top_slab == NULL || arena->top_slab != arena->top_recycled_slab);
     ak_assert(arena->top_slab == NULL || arena->top_slab->down != arena->top_slab);
 
-    const size_t size_bytes = ak_align_up(unaligned_size_bytes, align);
-
 
     ////////////////////////////////////////
     // ~~ Plan A: use the current slab ~~
 
-    if (ak_likely(
-        arena->top_slab != NULL &&
-        arena->current_offset + size_bytes <= arena->top_slab->cap
-    )) {
-        ak_memzero(arena->top_slab->buf + arena->current_offset, size_bytes);
-
-        const size_t prev_offset = arena->current_offset;
-        arena->current_offset += size_bytes;
-
-        return arena->top_slab->buf + prev_offset;
+    if (ak_likely(arena->top_slab != NULL)) {
+        size_t start_addr = ak_align_up((size_t)arena->top_slab->buf + arena->current_offset, align);
+        size_t end_addr = (size_t)arena->top_slab->buf + arena->top_slab->cap;
+        if (ak_likely(start_addr + unaligned_size_bytes <= end_addr)) {
+            ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
+            arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - arena->top_slab->buf;
+            return (uint8_t*)start_addr;
+        }
     }
 
 
@@ -759,7 +755,10 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
 
     AK_Slab *to_reuse = arena->top_recycled_slab;
     while (to_reuse != NULL) {
-        if (to_reuse->cap >= size_bytes) {
+        size_t start_addr = ak_align_up((size_t)to_reuse->buf, align);
+        size_t end_addr = (size_t)to_reuse->buf + to_reuse->cap;
+
+        if (start_addr + unaligned_size_bytes <= end_addr) {
             if (arena->top_recycled_slab == to_reuse) {
                 ak_assert(arena->top_recycled_slab->up == NULL);
                 arena->top_recycled_slab = arena->top_recycled_slab->down;
@@ -774,11 +773,11 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
             }
             to_reuse->down = arena->top_slab;
             arena->top_slab = to_reuse;
-            arena->current_offset = size_bytes;
+            arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - to_reuse->buf;
 
-            ak_memzero(to_reuse->buf, size_bytes);
+            ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
 
-            return to_reuse->buf;
+            return (uint8_t*)start_addr;
         }
 
         to_reuse = to_reuse->down;
@@ -791,15 +790,17 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
 plan_c:;
 
     const size_t default_slab_size = ak_alloc_get_default_pre_allocation(arena->host);
-    const size_t buf_size = size_bytes > default_slab_size ?
-        size_bytes :
+    const size_t buf_size = unaligned_size_bytes + align > default_slab_size ?
+        unaligned_size_bytes + align :
         default_slab_size;
     const size_t total_size = sizeof(AK_Slab) + buf_size;
 
-    AK_Slab *next_on_top = (AK_Slab*)ak_alloc_nozero(arena->host, total_size);
+    AK_Slab *next_on_top = (AK_Slab*)ak_alloc_nozero(arena->host, total_size, _Alignof(AK_Slab));
     if (next_on_top == NULL) {
         return NULL;
     }
+
+    ak_assert(ak_align_up((size_t)next_on_top, _Alignof(AK_Slab)) == (size_t)next_on_top);
 
     ak_memzero(next_on_top, sizeof(AK_Slab));
     next_on_top->cap = buf_size;
@@ -810,11 +811,12 @@ plan_c:;
     next_on_top->down = arena->top_slab;
 
     arena->top_slab = next_on_top;
-    arena->current_offset = size_bytes;
+    arena->current_offset = unaligned_size_bytes + align;
 
-    ak_memzero(next_on_top->buf, size_bytes);
+    size_t start_addr = ak_align_up((size_t)next_on_top->buf, align);
+    ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
 
-    return next_on_top->buf;
+    return (uint8_t*)start_addr;
 }
 
 AK_Scope

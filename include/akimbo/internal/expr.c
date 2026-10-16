@@ -183,7 +183,7 @@ ak_lbuilder_finish(
     /////////////////////////////////////////////////
     // ~~ copy the data into a contigous array ~~
     
-    AK_LogicalInst *lexpr_nodes = (AK_LogicalInst*)ak_alloc_zero(artifact_allocator, lexpr_len * sizeof(AK_LogicalInst));
+    AK_LogicalInst *lexpr_nodes = (AK_LogicalInst*)ak_alloc_zero(artifact_allocator, lexpr_len * sizeof(AK_LogicalInst), _Alignof(AK_LogicalInst));
     if (lexpr_nodes == NULL) {
         ak_report_error(&ctx->err, AK_StatusKind_OutOfMemory, ak_str8_lit("ran out of memory allocating logical expr nodes"));
         return AK_StatusKind_OutOfMemory;

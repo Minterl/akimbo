@@ -203,6 +203,7 @@ typedef union
 AK_AllocatorModeParams {
     struct {
         size_t size_bytes;
+        size_t align;
     } alloc;    
 
     struct {
@@ -273,7 +274,7 @@ AK_Scope {
 } AK_Scope;
 
 uint8_t*
-ak_alloc_zero(AK_Allocator alloc, size_t size_bytes);
+ak_alloc_zero(AK_Allocator alloc, size_t size_bytes, size_t align);
 
 void 
 ak_free(AK_Allocator alloc, void *ptr);
