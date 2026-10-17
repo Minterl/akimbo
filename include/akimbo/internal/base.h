@@ -208,6 +208,8 @@ AK_AllocatorModeParams {
 
     struct {
         uint8_t *ptr;
+        size_t size;
+        size_t align;
     } free;
 
     // void get_default_pre_allocation
@@ -277,7 +279,7 @@ uint8_t*
 ak_alloc_zero(AK_Allocator alloc, size_t size_bytes, size_t align);
 
 void 
-ak_free(AK_Allocator alloc, void *ptr);
+ak_free(AK_Allocator alloc, void *ptr, size_t size, size_t align);
 
 /// Allocates `n` blocks of size `sizes[i]` and puts the resulting pointer
 /// in `out_ptrs[i]`.

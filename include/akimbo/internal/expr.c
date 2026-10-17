@@ -219,7 +219,7 @@ ak_lbuilder_finish(
 
 void
 ak_lexpr_destroy(AK_LogicalExpr *lexpr, AK_Allocator artifact_allocator) {
-    ak_free(artifact_allocator, lexpr->insts);
+    ak_free(artifact_allocator, lexpr->insts, sizeof(AK_LogicalInst) * lexpr->len, _Alignof(AK_LogicalInst));
     ak_memzero(lexpr, sizeof(AK_LogicalExpr));
 }
 

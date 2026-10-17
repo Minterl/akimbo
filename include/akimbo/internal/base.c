@@ -622,9 +622,9 @@ ak_alloc_nozero(AK_Allocator alloc, size_t size_bytes, size_t align) {
 }
 
 ak_force_inline void
-ak_free(AK_Allocator alloc, void *ptr) {
+ak_free(AK_Allocator alloc, void *ptr, size_t size, size_t align) {
     alloc.f(alloc.ctx, AK_AllocatorModeKind_Free, (AK_AllocatorModeParams){
-        .free = { .ptr = ptr },
+        .free = { .ptr = ptr, .size = size, .align = align },
     });
 }
 
@@ -716,7 +716,7 @@ ak_slab_free_downward_from(AK_Slab *slab, AK_Allocator alloc) {
         AK_Slab *current = next;
         next = current->down;
         ak_assert(current != next);
-        ak_free(alloc, current);
+        ak_free(alloc, current, sizeof(AK_Slab) + current->cap, _Alignof(AK_Slab));
     }
 }
 

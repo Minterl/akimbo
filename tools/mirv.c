@@ -159,7 +159,7 @@ mrv_tstream_append(MRV_TokenStream *tstream, AK_Allocator artifact_allocator, MR
         return;
     }
 
-    MRV_TokenStreamBlock *next_block = (MRV_TokenStreamBlock*)ak_alloc_zero(artifact_allocator, sizeof(MRV_TokenStreamBlock), 32);
+    MRV_TokenStreamBlock *next_block = (MRV_TokenStreamBlock*)ak_alloc_zero(artifact_allocator, sizeof(MRV_TokenStreamBlock), _Alignof(MRV_TokenStreamBlock));
     ak_assert(next_block != NULL);
 
     if (tstream->tail != NULL) {
@@ -178,7 +178,7 @@ mrv_tstream_destroy(MRV_TokenStream *tstream, AK_Allocator artifact_allocator) {
     MRV_TokenStreamBlock *iter_block = tstream->tail;
     while (iter_block != NULL) {
         MRV_TokenStreamBlock *temp = iter_block->prev;
-        ak_free(artifact_allocator, iter_block);
+        ak_free(artifact_allocator, iter_block, sizeof(MRV_TokenStreamBlock), _Alignof(MRV_TokenStreamBlock));
         iter_block = temp;
     }
     ak_memzero(tstream, sizeof(MRV_TokenStream));
