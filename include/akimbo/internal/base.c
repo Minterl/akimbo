@@ -614,6 +614,22 @@ ak_dbg_write_stdout_(void *ctx, ak_str8 msg) {
 ///
 ////////////////////////////////////////////////////////////////////////////////
 
+#define AK_ASAN_PADDING_BYTES 16
+#define AK_ASAN_BYTE_GRANULARITY 8
+
+#if ( \
+    (defined(__has_feature) && __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)) && \
+    !defined(AK_NO_ASAN) \
+)
+#   include <sanitizer/asan_interface.h>
+#   define AK_FEATURE_ASAN
+#   define ak_asan_poison(ptr, len)   ASAN_POISON_MEMORY_REGION((ptr), (len))
+#   define ak_asan_unpoison(ptr, len) ASAN_UNPOISON_MEMORY_REGION((ptr), (len))
+#else
+#   define ak_asan_poison(ptr, len)   ((void)(0))
+#   define ak_asan_unpoison(ptr, len) ((void)(0))
+#endif // defined(__has_feature) && __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__) 
+
 ak_force_inline uint8_t*
 ak_alloc_nozero(AK_Allocator alloc, size_t size_bytes, size_t align) {
     return alloc.f(alloc.ctx, AK_AllocatorMode_Alloc, (AK_AllocatorParams){
@@ -716,6 +732,7 @@ ak_slab_free_downward_from(AK_Slab *slab, AK_Allocator alloc) {
         AK_Slab *current = next;
         next = current->down;
         ak_assert(current != next);
+        ak_asan_unpoison(current->buf, current->cap);
         ak_free(alloc, current, sizeof(AK_Slab) + current->cap, _Alignof(AK_Slab));
     }
 }
@@ -731,18 +748,34 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
     ak_assert(arena->top_slab == NULL || arena->top_slab != arena->top_recycled_slab);
     ak_assert(arena->top_slab == NULL || arena->top_slab->down != arena->top_slab);
 
+#   ifdef AK_FEATURE_ASAN
+    align = align < AK_ASAN_BYTE_GRANULARITY ? AK_ASAN_BYTE_GRANULARITY : align;
+#   endif //AK_FEATURE_ASAN
+
 
     ////////////////////////////////////////
     // ~~ Plan A: use the current slab ~~
 
     if (ak_likely(arena->top_slab != NULL)) {
+#       ifdef AK_FEATURE_ASAN
+            arena->current_offset += AK_ASAN_PADDING_BYTES;
+#       endif // AK_FEATURE_ASAN
+             
         uintptr_t start_addr = ak_align_up((uintptr_t)arena->top_slab->buf + arena->current_offset, align);
         uintptr_t end_addr = (uintptr_t)arena->top_slab->buf + arena->top_slab->cap;
+
         if (ak_likely(start_addr + unaligned_size_bytes <= end_addr)) {
+            ak_asan_unpoison((uint8_t*)start_addr, unaligned_size_bytes);
             ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
+
             arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - arena->top_slab->buf;
+
             return (uint8_t*)start_addr;
         }
+
+#       ifdef AK_FEATURE_ASAN
+            arena->current_offset -= AK_ASAN_PADDING_BYTES;
+#       endif // AK_FEATURE_ASAN
     }
 
 
@@ -755,7 +788,13 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
 
     AK_Slab *to_reuse = arena->top_recycled_slab;
     while (to_reuse != NULL) {
-        uintptr_t start_addr = ak_align_up((uintptr_t)to_reuse->buf, align);
+        uintptr_t start_addr = ak_align_up(
+            (uintptr_t)to_reuse->buf
+#           ifdef AK_FEATURE_ASAN
+                + AK_ASAN_PADDING_BYTES
+#           endif // AK_FEATURE_ASAN
+            , align
+        );
         uintptr_t end_addr = (uintptr_t)to_reuse->buf + to_reuse->cap;
 
         if (start_addr + unaligned_size_bytes <= end_addr) {
@@ -775,6 +814,7 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
             arena->top_slab = to_reuse;
             arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - to_reuse->buf;
 
+            ak_asan_unpoison((uint8_t*)start_addr, unaligned_size_bytes);
             ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
 
             return (uint8_t*)start_addr;
@@ -810,7 +850,17 @@ plan_c:;
     }
     next_on_top->down = arena->top_slab;
 
-    uintptr_t start_addr = ak_align_up((uintptr_t)next_on_top->buf, align);
+    ak_asan_poison(next_on_top->buf, next_on_top->cap);
+
+    uintptr_t start_addr = ak_align_up(
+        (uintptr_t)next_on_top->buf
+#       ifdef AK_FEATURE_ASAN
+            + AK_ASAN_PADDING_BYTES
+#       endif // AK_FEATURE_ASAN
+        , align
+    );
+              
+    ak_asan_unpoison((uint8_t*)start_addr, unaligned_size_bytes);
     ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
 
     arena->top_slab = next_on_top;
@@ -831,6 +881,9 @@ void
 ak_pop_scope(AK_Arena *arena, AK_Scope scope) {
     if (ak_likely(arena->top_slab == scope.slab && scope.offset > 0)) {
         arena->current_offset = scope.offset;
+        if (arena->top_slab != NULL) {
+            ak_asan_poison(arena->top_slab->buf + arena->current_offset, arena->top_slab->cap - arena->current_offset);
+        }
         return;
     }
 
@@ -885,6 +938,16 @@ ak_pop_scope(AK_Arena *arena, AK_Scope scope) {
         }
         ak_assert(prev_top_slab->up == NULL);
 
+#       ifdef AK_FEATURE_ASAN
+        {
+            AK_Slab *iter_slab = to_recycle;
+            while (iter_slab->up != NULL) {
+                ak_asan_poison(iter_slab->buf, iter_slab->cap);
+                iter_slab = iter_slab->up;
+            }
+        }
+#       endif // AK_FEATURE_ASAN
+
         // migrate the list
         if (arena->top_recycled_slab != NULL) {
             ak_assert((arena->top_recycled_slab)->up == NULL);
@@ -923,8 +986,10 @@ ak_arena_recycle_all(AK_Arena *arena) {
     AK_Slab *bottom_active = arena->top_slab;
     while (bottom_active->down != NULL) {
         ak_assert(bottom_active->down != bottom_active);
+        ak_asan_poison(bottom_active->buf, bottom_active->cap);
         bottom_active = bottom_active->down;
     }
+    ak_asan_poison(bottom_active->buf, bottom_active->cap);
 
     bottom_active->down = arena->top_recycled_slab;
     if (arena->top_recycled_slab != NULL) {
