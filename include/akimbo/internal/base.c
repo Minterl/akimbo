@@ -810,11 +810,11 @@ plan_c:;
     }
     next_on_top->down = arena->top_slab;
 
-    arena->top_slab = next_on_top;
-    arena->current_offset = unaligned_size_bytes + align;
-
     uintptr_t start_addr = ak_align_up((uintptr_t)next_on_top->buf, align);
     ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
+
+    arena->top_slab = next_on_top;
+    arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - arena->top_slab->buf;
 
     return (uint8_t*)start_addr;
 }
