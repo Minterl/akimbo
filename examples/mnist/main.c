@@ -4,19 +4,19 @@
 
 #include <stdio.h>
 
-AK_AllocatorModeReturn
-libc_allocator_f(void *ctx, AK_AllocatorModeKind mode_kind, AK_AllocatorModeParams params) {
+AK_AllocatorReturn
+libc_allocator_f(void *ctx, AK_AllocatorMode mode_kind, AK_AllocatorParams params) {
     (void)ctx;
     switch (mode_kind) {
-        case AK_AllocatorModeKind_Alloc:
-            return (AK_AllocatorModeReturn){ .alloc.ptr = malloc(params.alloc.size_bytes) };
-        case AK_AllocatorModeKind_Free:
+        case AK_AllocatorMode_Alloc:
+            return (AK_AllocatorReturn){ .alloc.ptr = malloc(params.alloc.size_bytes) };
+        case AK_AllocatorMode_Free:
             free(params.free.ptr);
-            return (AK_AllocatorModeReturn){0};
-        case AK_AllocatorModeKind_GetDefaultPreAllocation:
-            return (AK_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
-        case AK_AllocatorModeKind_GetFlags:
-            return (AK_AllocatorModeReturn){ .get_flags.flags = 0};
+            return (AK_AllocatorReturn){0};
+        case AK_AllocatorMode_GetDefaultPreAllocation:
+            return (AK_AllocatorReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
+        case AK_AllocatorMode_GetFlags:
+            return (AK_AllocatorReturn){ .get_flags.flags = 0};
         default:
             ak_unreachable();
     }

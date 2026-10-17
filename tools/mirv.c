@@ -4216,14 +4216,14 @@ mrv_gen_source(
 #include <stdio.h>
 #include <stdlib.h>
 
-AK_AllocatorModeReturn
-libc_allocator_f(void *ctx, AK_AllocatorModeKind mode_kind, AK_AllocatorModeParams params) {
+AK_AllocatorReturn
+libc_allocator_f(void *ctx, AK_AllocatorMode mode_kind, AK_AllocatorParams params) {
     (void)ctx;
     switch (mode_kind) {
-        case AK_AllocatorModeKind_Alloc: {
+        case AK_AllocatorMode_Alloc: {
             size_t total_size = params.alloc.size_bytes + params.alloc.align + sizeof(uint8_t*);
             uint8_t *unaligned = malloc(total_size);
-            if (!unaligned) return (AK_AllocatorModeReturn){ .alloc.ptr = NULL };
+            if (!unaligned) return (AK_AllocatorReturn){ .alloc.ptr = NULL };
 
             size_t to_ret_unaligned = (size_t)unaligned + sizeof(uint8_t*);
             size_t aligned_int = ak_align_up(to_ret_unaligned, params.alloc.align);
@@ -4231,20 +4231,20 @@ libc_allocator_f(void *ctx, AK_AllocatorModeKind mode_kind, AK_AllocatorModePara
             uint8_t **header_ptr = (uint8_t**)(aligned_int - sizeof(uint8_t*));
             *header_ptr = unaligned;
 
-            return (AK_AllocatorModeReturn){ .alloc.ptr = (uint8_t*)aligned_int };
+            return (AK_AllocatorReturn){ .alloc.ptr = (uint8_t*)aligned_int };
         }
 
-        case AK_AllocatorModeKind_Free: {
+        case AK_AllocatorMode_Free: {
             uint8_t *original_ptr = *((uint8_t**)(params.free.ptr - sizeof(uint8_t*)));
             free(original_ptr);
-            return (AK_AllocatorModeReturn){0};
+            return (AK_AllocatorReturn){0};
         }
 
-        case AK_AllocatorModeKind_GetDefaultPreAllocation:
-            return (AK_AllocatorModeReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
+        case AK_AllocatorMode_GetDefaultPreAllocation:
+            return (AK_AllocatorReturn){ .get_default_pre_allocation.size_bytes = 1024 * 1024 };
 
-        case AK_AllocatorModeKind_GetFlags:
-            return (AK_AllocatorModeReturn){ .get_flags.flags = 0};
+        case AK_AllocatorMode_GetFlags:
+            return (AK_AllocatorReturn){ .get_flags.flags = 0};
 
         default:
             ak_unreachable();

@@ -184,12 +184,12 @@ AK_STATUS_KIND_CSTRING_TABLE[] = {
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef uint8_t
-AK_AllocatorModeKind;
-enum AK_AllocatorModeKind {
-    AK_AllocatorModeKind_Alloc,
-    AK_AllocatorModeKind_Free,
-    AK_AllocatorModeKind_GetDefaultPreAllocation,
-    AK_AllocatorModeKind_GetFlags,
+AK_AllocatorMode;
+enum AK_AllocatorMode {
+    AK_AllocatorMode_Alloc,
+    AK_AllocatorMode_Free,
+    AK_AllocatorMode_GetDefaultPreAllocation,
+    AK_AllocatorMode_GetFlags,
 };
 
 typedef uint32_t 
@@ -200,7 +200,7 @@ enum {
 };
 
 typedef union
-AK_AllocatorModeParams {
+AK_AllocatorParams {
     struct {
         size_t size_bytes;
         size_t align;
@@ -214,10 +214,10 @@ AK_AllocatorModeParams {
 
     // void get_default_pre_allocation
     // void get_flags
-} AK_AllocatorModeParams;
+} AK_AllocatorParams;
 
 typedef union
-AK_AllocatorModeReturn {
+AK_AllocatorReturn {
     struct {
         uint8_t *ptr;
     } alloc;
@@ -231,7 +231,10 @@ AK_AllocatorModeReturn {
     struct {
         AK_AllocatorFlags flags;
     } get_flags;
-} AK_AllocatorModeReturn;
+} AK_AllocatorReturn;
+
+typedef AK_AllocatorReturn (*
+AK_AllocatorFunction)(void *ctx, AK_AllocatorMode mode, AK_AllocatorParams params);
 
 /// To be passed by value, since it is not all that large, and doing so
 /// eliminates dependent instruction loads.
@@ -242,7 +245,7 @@ typedef struct
 AK_Allocator {
     /// Context passed to each allocator method.
     void *ctx;
-    AK_AllocatorModeReturn (*f)(void *ctx, AK_AllocatorModeKind mode, AK_AllocatorModeParams params);
+    AK_AllocatorFunction f;
 } AK_Allocator;
 
 typedef struct

@@ -616,14 +616,14 @@ ak_dbg_write_stdout_(void *ctx, ak_str8 msg) {
 
 ak_force_inline uint8_t*
 ak_alloc_nozero(AK_Allocator alloc, size_t size_bytes, size_t align) {
-    return alloc.f(alloc.ctx, AK_AllocatorModeKind_Alloc, (AK_AllocatorModeParams){
+    return alloc.f(alloc.ctx, AK_AllocatorMode_Alloc, (AK_AllocatorParams){
         .alloc = { .size_bytes = size_bytes, .align = align },
     }).alloc.ptr;
 }
 
 ak_force_inline void
 ak_free(AK_Allocator alloc, void *ptr, size_t size, size_t align) {
-    alloc.f(alloc.ctx, AK_AllocatorModeKind_Free, (AK_AllocatorModeParams){
+    alloc.f(alloc.ctx, AK_AllocatorMode_Free, (AK_AllocatorParams){
         .free = { .ptr = ptr, .size = size, .align = align },
     });
 }
@@ -631,15 +631,15 @@ ak_free(AK_Allocator alloc, void *ptr, size_t size, size_t align) {
 
 ak_force_inline AK_AllocatorFlags
 ak_alloc_get_flags(AK_Allocator alloc) {
-    return alloc.f(alloc.ctx, AK_AllocatorModeKind_GetFlags, (AK_AllocatorModeParams){0}).get_flags.flags;
+    return alloc.f(alloc.ctx, AK_AllocatorMode_GetFlags, (AK_AllocatorParams){0}).get_flags.flags;
 }
 
 ak_force_inline size_t
 ak_alloc_get_default_pre_allocation(AK_Allocator alloc) {
     return alloc.f(
         alloc.ctx,
-        AK_AllocatorModeKind_GetDefaultPreAllocation,
-        (AK_AllocatorModeParams){0}
+        AK_AllocatorMode_GetDefaultPreAllocation,
+        (AK_AllocatorParams){0}
     ).get_flags.flags;
 }
 
@@ -736,8 +736,8 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
     // ~~ Plan A: use the current slab ~~
 
     if (ak_likely(arena->top_slab != NULL)) {
-        size_t start_addr = ak_align_up((size_t)arena->top_slab->buf + arena->current_offset, align);
-        size_t end_addr = (size_t)arena->top_slab->buf + arena->top_slab->cap;
+        uintptr_t start_addr = ak_align_up((uintptr_t)arena->top_slab->buf + arena->current_offset, align);
+        uintptr_t end_addr = (uintptr_t)arena->top_slab->buf + arena->top_slab->cap;
         if (ak_likely(start_addr + unaligned_size_bytes <= end_addr)) {
             ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
             arena->current_offset = (uint8_t*)start_addr + unaligned_size_bytes - arena->top_slab->buf;
@@ -755,8 +755,8 @@ ak_arena_alloc(AK_Arena *arena, size_t unaligned_size_bytes, size_t align) {
 
     AK_Slab *to_reuse = arena->top_recycled_slab;
     while (to_reuse != NULL) {
-        size_t start_addr = ak_align_up((size_t)to_reuse->buf, align);
-        size_t end_addr = (size_t)to_reuse->buf + to_reuse->cap;
+        uintptr_t start_addr = ak_align_up((uintptr_t)to_reuse->buf, align);
+        uintptr_t end_addr = (uintptr_t)to_reuse->buf + to_reuse->cap;
 
         if (start_addr + unaligned_size_bytes <= end_addr) {
             if (arena->top_recycled_slab == to_reuse) {
@@ -800,7 +800,7 @@ plan_c:;
         return NULL;
     }
 
-    ak_assert(ak_align_up((size_t)next_on_top, _Alignof(AK_Slab)) == (size_t)next_on_top);
+    ak_assert(ak_align_up((uintptr_t)next_on_top, _Alignof(AK_Slab)) == (uintptr_t)next_on_top);
 
     ak_memzero(next_on_top, sizeof(AK_Slab));
     next_on_top->cap = buf_size;
@@ -813,7 +813,7 @@ plan_c:;
     arena->top_slab = next_on_top;
     arena->current_offset = unaligned_size_bytes + align;
 
-    size_t start_addr = ak_align_up((size_t)next_on_top->buf, align);
+    uintptr_t start_addr = ak_align_up((uintptr_t)next_on_top->buf, align);
     ak_memzero((uint8_t*)start_addr, unaligned_size_bytes);
 
     return (uint8_t*)start_addr;
